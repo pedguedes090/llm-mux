@@ -1,8 +1,8 @@
 # llm-mux
 
-**Free multi-format LLM gateway** - use any model with any API format, without API keys.
+**Free multi-format LLM gateway** - access any model through your preferred API format, without API keys.
 
-Authenticate once with OAuth, access Claude/Gemini/GPT through OpenAI, Gemini, Claude, or Ollama API formats.
+Authenticate once with OAuth, then use OpenAI/Gemini/Claude/Ollama API formats to call any provider.
 
 ## Why llm-mux?
 
@@ -10,8 +10,8 @@ Authenticate once with OAuth, access Claude/Gemini/GPT through OpenAI, Gemini, C
 |------------------------|---------|
 | Requires API keys | Uses OAuth from CLI tools |
 | Pay per token | Free (within CLI quotas) |
-| One provider per key | All providers, one endpoint |
-| Locked to one API format | Any format in, any format out |
+| One provider per key | All providers, one gateway |
+| Learn each provider's API | Use your preferred format |
 
 ## Quick Start
 
@@ -27,7 +27,7 @@ llm-mux --copilot-login      # GitHub Copilot
 # Start service
 brew services start llm-mux
 
-# Use
+# Call Gemini using OpenAI format
 curl http://localhost:8318/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "Hello!"}]}'
@@ -40,8 +40,8 @@ curl http://localhost:8318/v1/chat/completions \
 | Provider | Login | Models |
 |----------|-------|--------|
 | **Gemini CLI** | `--login` | gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-3-pro-preview |
-| **Antigravity** | `--antigravity-login` | Gemini models + Claude Sonnet/Opus 4.5 + GPT-OSS + Computer Use |
-| **AI Studio** | `--login` | Gemini models + image generation models |
+| **Antigravity** | `--antigravity-login` | Gemini + Claude Sonnet/Opus 4.5 + GPT-OSS + Computer Use |
+| **AI Studio** | `--login` | Gemini models + image generation |
 | **Vertex AI** | API Key | Gemini models |
 
 ### Anthropic
@@ -68,36 +68,42 @@ curl http://localhost:8318/v1/chat/completions \
 
 ## API Formats
 
-Use any format to access any provider:
+Choose your preferred format - all formats can access all providers:
 
 | Format | Endpoints |
 |--------|-----------|
-| **OpenAI** | `POST /v1/chat/completions`, `POST /v1/completions`, `GET /v1/models` |
-| **Gemini** | `POST /v1beta/models/{model}:generateContent`, `POST /v1beta/models/{model}:streamGenerateContent` |
-| **Claude** | `POST /v1/messages` |
-| **Ollama** | `POST /api/chat`, `POST /api/generate` |
+| **OpenAI** | `/v1/chat/completions`, `/v1/completions`, `/v1/models` |
+| **Gemini** | `/v1beta/models/{model}:generateContent`, `/v1beta/models/{model}:streamGenerateContent` |
+| **Claude** | `/v1/messages` |
+| **Ollama** | `/api/chat`, `/api/generate`, `/api/tags` |
 
-Example: Call Gemini model using OpenAI format, or call Claude model using Gemini format.
+```bash
+# Same model, different formats:
+
+# OpenAI format
+curl localhost:8318/v1/chat/completions -d '{"model":"gemini-2.5-flash",...}'
+
+# Gemini format
+curl localhost:8318/v1beta/models/gemini-2.5-flash:generateContent -d '{"contents":[...]}'
+
+# Ollama format
+curl localhost:8318/api/chat -d '{"model":"gemini-2.5-flash",...}'
+```
 
 ## Architecture
 
-Hub-and-spoke translation via Intermediate Representation (IR):
-
 ```
-  Request Formats              Providers
-  ───────────────              ─────────
-     OpenAI ───┐            ┌─── Gemini CLI
-     Claude ───┤            ├─── Antigravity
-     Gemini ───┼── IR ──────┼─── Claude
-     Ollama ───┤            ├─── Codex/Copilot
-       Kiro ───┘            └─── iFlow/Kiro
+  API Formats                      Providers
+  ───────────                      ─────────
+    OpenAI ───┐                 ┌─── Gemini CLI
+    Claude ───┼─── Unified ─────┼─── Antigravity
+    Gemini ───┤       IR        ├─── Claude/Kiro
+    Ollama ───┘                 └─── Codex/Copilot/iFlow
 ```
 
-Each provider implements 2 translations (to/from IR) instead of n² format converters.
-
-**Smart Tool Call Normalization**: Auto-fixes parameter naming mismatches (`filePath` ↔ `file_path`, semantic synonyms).
-
-**Dynamic Model Registry**: Reference counting tracks OAuth sessions, auto-hides models when quota exceeded.
+- **IR Translation**: Each format converts to/from IR (2n translations instead of n²)
+- **Tool Call Normalization**: Auto-fixes parameter mismatches (`filePath` ↔ `file_path`)
+- **Dynamic Registry**: Tracks OAuth sessions, auto-hides models when quota exceeded
 
 ## Installation
 
@@ -128,14 +134,14 @@ auth-dir: "~/.config/llm-mux/auth"
 use-canonical-translator: true
 ```
 
-Tokens are stored in `~/.config/llm-mux/auth/` and auto-refresh.
+Tokens stored in `~/.config/llm-mux/auth/` with auto-refresh.
 
 ## How It Works
 
 1. **OAuth Capture**: Performs same OAuth flow as official CLI tools
 2. **Token Management**: Stores and auto-refreshes tokens
-3. **Request Translation**: Converts OpenAI-format requests to provider-native format via IR
-4. **Response Translation**: Converts provider responses back to OpenAI format
+3. **Format Translation**: Parses request (any format) → IR → provider-native format
+4. **Response Translation**: Provider response → IR → original request format
 5. **Load Balancing**: Routes to available OAuth sessions, handles quota limits
 
 ## License
