@@ -28,10 +28,8 @@ import (
 )
 
 const (
-	codeAssistEndpoint      = "https://cloudcode-pa.googleapis.com"
-	codeAssistVersion       = "v1internal"
-	geminiOauthClientID     = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-	geminiOauthClientSecret = "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"
+	codeAssistEndpoint = "https://cloudcode-pa.googleapis.com"
+	codeAssistVersion  = "v1internal"
 
 	// Rate limit retry settings: 5 retries with exponential backoff up to ~60 seconds total
 	rateLimitMaxRetries = 5
@@ -82,10 +80,7 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	}
 
 	projectID := resolveGeminiProjectID(auth)
-	models := cliPreviewFallbackOrder(req.Model)
-	if len(models) == 0 || models[0] != req.Model {
-		models = append([]string{req.Model}, models...)
-	}
+	models := []string{req.Model}
 
 	httpClient := newHTTPClient(ctx, e.cfg, auth, 0)
 
@@ -205,11 +200,7 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	}
 
 	projectID := resolveGeminiProjectID(auth)
-
-	models := cliPreviewFallbackOrder(req.Model)
-	if len(models) == 0 || models[0] != req.Model {
-		models = append([]string{req.Model}, models...)
-	}
+	models := []string{req.Model}
 
 	httpClient := newHTTPClient(ctx, e.cfg, auth, 0)
 
@@ -296,7 +287,7 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 			}()
 			if opts.Alt == "" {
 				scanner := bufio.NewScanner(resp.Body)
-				scanner.Buffer(make([]byte, 64*1024), 20_971_520)
+				scanner.Buffer(make([]byte, 64*1024), DefaultStreamBufferSize)
 				streamState := &GeminiCLIStreamState{
 					ClaudeState: from_ir.NewClaudeStreamState(),
 				}
@@ -363,11 +354,7 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 	}
 
 	from := opts.SourceFormat
-
-	models := cliPreviewFallbackOrder(req.Model)
-	if len(models) == 0 || models[0] != req.Model {
-		models = append([]string{req.Model}, models...)
-	}
+	models := []string{req.Model}
 
 	httpClient := newHTTPClient(ctx, e.cfg, auth, 0)
 	respCtx := context.WithValue(ctx, "alt", opts.Alt)
@@ -644,28 +631,6 @@ func applyGeminiCLIHeaders(r *http.Request) {
 func geminiCLIClientMetadata() string {
 	// Keep parity with CLI client defaults
 	return "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI"
-}
-
-// cliPreviewFallbackOrder returns preview model candidates for a base model.
-func cliPreviewFallbackOrder(model string) []string {
-	switch model {
-	case "gemini-2.5-pro":
-		return []string{
-			// "gemini-2.5-pro-preview-05-06",
-			// "gemini-2.5-pro-preview-06-05",
-		}
-	case "gemini-2.5-flash":
-		return []string{
-			// "gemini-2.5-flash-preview-04-17",
-			// "gemini-2.5-flash-preview-05-20",
-		}
-	case "gemini-2.5-flash-lite":
-		return []string{
-			// "gemini-2.5-flash-lite-preview-06-17",
-		}
-	default:
-		return nil
-	}
 }
 
 // setJSONField sets a top-level JSON field on a byte slice payload via sjson.

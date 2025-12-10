@@ -639,13 +639,14 @@ func (m *Manager) selectProviders(model string, providers []string) []string {
 
 // recordProviderResult records success/failure for weighted selection.
 func (m *Manager) recordProviderResult(provider, model string, success bool, latency time.Duration) {
-	if m.providerStats == nil {
+	stats := m.providerStats
+	if stats == nil {
 		return
 	}
 	if success {
-		m.providerStats.RecordSuccess(provider, model, latency)
+		stats.RecordSuccess(provider, model, latency)
 	} else {
-		m.providerStats.RecordFailure(provider, model)
+		stats.RecordFailure(provider, model)
 	}
 }
 
@@ -1611,12 +1612,13 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 		return
 	}
 	cloned := auth.Clone()
+	authUpdatedAt := auth.UpdatedAt
 	updated, err := exec.Refresh(ctx, cloned)
 	log.Debugf("refreshed %s, %s, %v", auth.Provider, auth.ID, err)
 	now := time.Now()
 	if err != nil {
 		m.mu.Lock()
-		if current := m.auths[id]; current != nil {
+		if current := m.auths[id]; current != nil && current.UpdatedAt == authUpdatedAt {
 			current.NextRefreshAfter = now.Add(refreshFailureBackoff)
 			current.LastError = &Error{Message: err.Error()}
 			m.auths[id] = current

@@ -152,7 +152,7 @@ func (e *QwenExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			}
 		}()
 		scanner := bufio.NewScanner(httpResp.Body)
-		scanner.Buffer(make([]byte, 64*1024), 20_971_520)
+		scanner.Buffer(make([]byte, 64*1024), DefaultStreamBufferSize)
 		var streamState *OpenAIStreamState
 		for scanner.Scan() {
 			line := scanner.Bytes()

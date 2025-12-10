@@ -79,9 +79,13 @@ type apiStats struct {
 	Models        map[string]*modelStats
 }
 
-// maxDetailsPerModel limits the number of request details stored per model
-// to prevent unbounded memory growth. Uses FIFO eviction when limit is reached.
-const maxDetailsPerModel = 1000
+// Memory limits to prevent unbounded growth in statistics collection.
+const (
+	maxDetailsPerModel = 1000 // Max request details per model
+	maxTrackedAPIs     = 500  // Max unique API keys
+	maxModelsPerAPI    = 50   // Max models per API key
+	maxDaysRetention   = 30   // Keep last 30 days only
+)
 
 // modelStats holds aggregated metrics for a specific model within an API.
 type modelStats struct {
@@ -196,6 +200,10 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 
 	stats, ok := s.apis[statsKey]
 	if !ok {
+		// Only track new API if under limit; skip if over capacity
+		if len(s.apis) >= maxTrackedAPIs {
+			return
+		}
 		stats = &apiStats{Models: make(map[string]*modelStats)}
 		s.apis[statsKey] = stats
 	}
@@ -211,6 +219,23 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 	s.requestsByHour[hourKey]++
 	s.tokensByDay[dayKey] += totalTokens
 	s.tokensByHour[hourKey] += totalTokens
+
+	// Enforce retention policy: remove entries older than maxDaysRetention
+	s.enforceRetentionPolicy(timestamp)
+}
+
+// enforceRetentionPolicy removes day entries older than maxDaysRetention.
+// Called during Record() with the current request timestamp. Lock must be held.
+func (s *RequestStatistics) enforceRetentionPolicy(currentTime time.Time) {
+	cutoffTime := currentTime.AddDate(0, 0, -maxDaysRetention)
+	cutoffKey := cutoffTime.Format("2006-01-02")
+
+	for dayKey := range s.requestsByDay {
+		if dayKey < cutoffKey {
+			delete(s.requestsByDay, dayKey)
+			delete(s.tokensByDay, dayKey)
+		}
+	}
 }
 
 func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail RequestDetail) {
@@ -218,6 +243,10 @@ func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail
 	stats.TotalTokens += detail.Tokens.TotalTokens
 	modelStatsValue, ok := stats.Models[model]
 	if !ok {
+		// Only track new model if under limit; skip model details if over capacity
+		if len(stats.Models) >= maxModelsPerAPI {
+			return
+		}
 		modelStatsValue = &modelStats{}
 		stats.Models[model] = modelStatsValue
 	}

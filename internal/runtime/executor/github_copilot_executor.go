@@ -17,6 +17,7 @@ import (
 	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/sjson"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -25,7 +26,6 @@ const (
 	githubCopilotAuthType      = "github-copilot"
 	githubCopilotTokenCacheTTL = 25 * time.Minute
 	tokenExpiryBuffer          = 5 * time.Minute
-	copilotMaxScannerBuffer    = 20_971_520
 
 	copilotUserAgent     = "GithubCopilot/1.0"
 	copilotEditorVersion = "vscode/1.100.0"
@@ -36,9 +36,10 @@ const (
 
 // GitHubCopilotExecutor handles requests to the GitHub Copilot API.
 type GitHubCopilotExecutor struct {
-	cfg   *config.Config
-	mu    sync.RWMutex
-	cache map[string]*cachedCopilotToken
+	cfg      *config.Config
+	mu       sync.RWMutex
+	cache    map[string]*cachedCopilotToken
+	sfGroup  singleflight.Group
 }
 
 type cachedCopilotToken struct {
@@ -169,7 +170,7 @@ func (e *GitHubCopilotExecutor) ExecuteStream(ctx context.Context, auth *cliprox
 		defer func() { _ = httpResp.Body.Close() }()
 
 		scanner := bufio.NewScanner(httpResp.Body)
-		scanner.Buffer(nil, copilotMaxScannerBuffer)
+		scanner.Buffer(nil, DefaultStreamBufferSize)
 		messageID := uuid.NewString()
 		streamState := &OpenAIStreamState{}
 
@@ -241,6 +242,7 @@ func (e *GitHubCopilotExecutor) ensureAPIToken(ctx context.Context, auth *clipro
 		return "", statusErr{code: http.StatusUnauthorized, msg: "missing github access token"}
 	}
 
+	// Check cache first
 	e.mu.RLock()
 	if cached, ok := e.cache[accessToken]; ok && cached.expiresAt.After(time.Now().Add(tokenExpiryBuffer)) {
 		e.mu.RUnlock()
@@ -248,24 +250,40 @@ func (e *GitHubCopilotExecutor) ensureAPIToken(ctx context.Context, auth *clipro
 	}
 	e.mu.RUnlock()
 
-	copilotAuth := copilotauth.NewCopilotAuth(e.cfg)
-	apiToken, err := copilotAuth.GetCopilotAPIToken(ctx, accessToken)
+	// Use singleflight to prevent cache stampede: only one goroutine fetches token while others wait
+	result, err, _ := e.sfGroup.Do(accessToken, func() (interface{}, error) {
+		// Check cache again in case another goroutine just filled it
+		e.mu.RLock()
+		if cached, ok := e.cache[accessToken]; ok && cached.expiresAt.After(time.Now().Add(tokenExpiryBuffer)) {
+			e.mu.RUnlock()
+			return cached.token, nil
+		}
+		e.mu.RUnlock()
+
+		copilotAuth := copilotauth.NewCopilotAuth(e.cfg)
+		apiToken, err := copilotAuth.GetCopilotAPIToken(ctx, accessToken)
+		if err != nil {
+			return "", statusErr{code: http.StatusUnauthorized, msg: fmt.Sprintf("failed to get copilot api token: %v", err)}
+		}
+
+		expiresAt := time.Now().Add(githubCopilotTokenCacheTTL)
+		if apiToken.ExpiresAt > 0 {
+			expiresAt = time.Unix(apiToken.ExpiresAt, 0)
+		}
+		e.mu.Lock()
+		e.cache[accessToken] = &cachedCopilotToken{
+			token:     apiToken.Token,
+			expiresAt: expiresAt,
+		}
+		e.mu.Unlock()
+
+		return apiToken.Token, nil
+	})
+
 	if err != nil {
-		return "", statusErr{code: http.StatusUnauthorized, msg: fmt.Sprintf("failed to get copilot api token: %v", err)}
+		return "", err
 	}
-
-	expiresAt := time.Now().Add(githubCopilotTokenCacheTTL)
-	if apiToken.ExpiresAt > 0 {
-		expiresAt = time.Unix(apiToken.ExpiresAt, 0)
-	}
-	e.mu.Lock()
-	e.cache[accessToken] = &cachedCopilotToken{
-		token:     apiToken.Token,
-		expiresAt: expiresAt,
-	}
-	e.mu.Unlock()
-
-	return apiToken.Token, nil
+	return result.(string), nil
 }
 
 func (e *GitHubCopilotExecutor) applyHeaders(r *http.Request, apiToken string) {

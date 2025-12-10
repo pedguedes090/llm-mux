@@ -28,18 +28,15 @@ import (
 // The "antigravity" format is used for upstream communication with the Google Cloud Code API.
 
 const (
-	antigravityBaseURLDaily        = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-	antigravityBaseURLAutopush     = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
-	antigravityBaseURLProd         = "https://cloudcode-pa.googleapis.com"
-	antigravityStreamPath          = "/v1internal:streamGenerateContent"
-	antigravityGeneratePath        = "/v1internal:generateContent"
-	antigravityModelsPath          = "/v1internal:fetchAvailableModels"
-	antigravityClientID            = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-	antigravityClientSecret        = "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"
-	defaultAntigravityAgent        = "antigravity/1.11.5 windows/amd64"
-	antigravityAuthType            = "antigravity"
-	refreshSkew                    = 3000 * time.Second
-	streamScannerBuffer        int = 20_971_520
+	antigravityBaseURLDaily    = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+	antigravityBaseURLAutopush = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
+	antigravityBaseURLProd     = "https://cloudcode-pa.googleapis.com"
+	antigravityStreamPath      = "/v1internal:streamGenerateContent"
+	antigravityGeneratePath    = "/v1internal:generateContent"
+	antigravityModelsPath      = "/v1internal:fetchAvailableModels"
+	defaultAntigravityAgent    = "antigravity/1.11.5 windows/amd64"
+	antigravityAuthType        = "antigravity"
+	refreshSkew                = 3000 * time.Second
 )
 
 // Note: We use crypto/rand via uuid package for thread-safe random generation
@@ -259,7 +256,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 				}
 			}()
 			scanner := bufio.NewScanner(resp.Body)
-			scanner.Buffer(nil, streamScannerBuffer)
+			scanner.Buffer(nil, DefaultStreamBufferSize)
 
 			// Initialize streaming state with schema context from original request for tool call normalization
 			streamState := NewAntigravityStreamState(opts.OriginalRequest)

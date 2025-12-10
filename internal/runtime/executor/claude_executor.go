@@ -207,7 +207,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		// If from == claude (Claude → Claude), directly forward the SSE stream without translation
 		if from.String() == "claude" {
 			scanner := bufio.NewScanner(decodedBody)
-			scanner.Buffer(make([]byte, 64*1024), 20_971_520)
+			scanner.Buffer(make([]byte, 64*1024), DefaultStreamBufferSize)
 			for scanner.Scan() {
 				line := scanner.Bytes()
 				if detail, ok := parseClaudeStreamUsage(line); ok {
@@ -228,7 +228,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 
 		// For other formats, use translation
 		scanner := bufio.NewScanner(decodedBody)
-		scanner.Buffer(make([]byte, 64*1024), 20_971_520)
+		scanner.Buffer(make([]byte, 64*1024), DefaultStreamBufferSize)
 		messageID := "msg-" + req.Model
 
 		for scanner.Scan() {
