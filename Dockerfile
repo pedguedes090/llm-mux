@@ -1,9 +1,9 @@
-FROM golang:1.23-alpine AS builder
+# Stage 1: Build stage
+FROM golang:1.25-alpine AS builder
 
-WORKDIR /app
+WORKDIR /build
 
 COPY go.mod go.sum ./
-
 RUN go mod download
 
 COPY . .
@@ -12,22 +12,28 @@ ARG VERSION=dev
 ARG COMMIT=none
 ARG BUILD_DATE=unknown
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o ./llm-mux ./cmd/server/
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \
+    -o ./llm-mux \
+    ./cmd/server/
 
-FROM alpine:3.22.0
+# Stage 2: Runtime stage
+FROM alpine:3.23
 
 RUN apk add --no-cache tzdata ca-certificates
 
-RUN mkdir /llm-mux
-
-COPY --from=builder ./app/llm-mux /llm-mux/llm-mux
-
-COPY config.example.yaml /llm-mux/config.example.yaml
+RUN addgroup -g 1000 llm-mux && \
+    adduser -D -u 1000 -G llm-mux llm-mux && \
+    mkdir -p /llm-mux && \
+    chown -R llm-mux:llm-mux /llm-mux
 
 WORKDIR /llm-mux
 
-EXPOSE 8318
+COPY --from=builder --chown=llm-mux:llm-mux /build/llm-mux ./
+COPY --chown=llm-mux:llm-mux config.example.yaml ./
 
+USER llm-mux
 ENV TZ=UTC
+EXPOSE 8318
 
 CMD ["./llm-mux"]
