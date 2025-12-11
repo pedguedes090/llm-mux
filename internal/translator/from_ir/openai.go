@@ -316,13 +316,18 @@ func ToOpenAIChatCompletionCandidates(candidates []ir.CandidateResult, usage *ir
 		}
 
 		msgContent := map[string]any{"role": string(msg.Role)}
-		if text := builder.GetTextContent(); text != "" {
+		text := builder.GetTextContent()
+		tcs := builder.BuildOpenAIToolCalls()
+		if text != "" {
 			msgContent["content"] = text
+		} else if tcs != nil {
+			// OpenAI spec: content must be null (not omitted) when tool_calls present
+			msgContent["content"] = nil
 		}
 		if reasoning := builder.GetReasoningContent(); reasoning != "" {
 			ir.AddReasoningToMessage(msgContent, reasoning, "")
 		}
-		if tcs := builder.BuildOpenAIToolCalls(); tcs != nil {
+		if tcs != nil {
 			msgContent["tool_calls"] = tcs
 		}
 
@@ -374,13 +379,18 @@ func ToOpenAIChatCompletionMeta(messages []ir.Message, usage *ir.Usage, model, m
 
 	if msg := builder.GetLastMessage(); msg != nil {
 		msgContent := map[string]any{"role": string(msg.Role)}
-		if text := builder.GetTextContent(); text != "" {
+		text := builder.GetTextContent()
+		tcs := builder.BuildOpenAIToolCalls()
+		if text != "" {
 			msgContent["content"] = text
+		} else if tcs != nil {
+			// OpenAI spec: content must be null (not omitted) when tool_calls present
+			msgContent["content"] = nil
 		}
 		if reasoning := builder.GetReasoningContent(); reasoning != "" {
 			ir.AddReasoningToMessage(msgContent, reasoning, "")
 		}
-		if tcs := builder.BuildOpenAIToolCalls(); tcs != nil {
+		if tcs != nil {
 			msgContent["tool_calls"] = tcs
 		}
 
