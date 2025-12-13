@@ -134,11 +134,6 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 
 		reporter.publish(ctx, parseAntigravityUsage(bodyBytes))
 
-		// Debug: log raw response for Claude models to analyze format differences
-		if strings.Contains(req.Model, "claude") {
-			log.Infof("antigravity: RAW CLAUDE RESPONSE (model=%s):\n%s", req.Model, string(bodyBytes))
-		}
-
 		// Translate response using canonical translator
 		translatedResp, errTranslateResp := TranslateGeminiCLIResponseNonStream(e.cfg, from, bodyBytes, req.Model)
 		if errTranslateResp != nil {
