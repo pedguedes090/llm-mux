@@ -166,7 +166,23 @@ func parseClaudeMessage(m gjson.Result) ir.Message {
 			case "text":
 				msg.Content = append(msg.Content, ir.ContentPart{Type: ir.ContentTypeText, Text: block.Get("text").String()})
 			case "thinking":
-				msg.Content = append(msg.Content, ir.ContentPart{Type: ir.ContentTypeReasoning, Reasoning: block.Get("thinking").String()})
+				// Claude Extended Thinking: Parse thinking text and signature
+				var sig []byte
+				if s := block.Get("signature").String(); s != "" {
+					sig = []byte(s)
+				}
+				msg.Content = append(msg.Content, ir.ContentPart{
+					Type:             ir.ContentTypeReasoning,
+					Reasoning:        block.Get("thinking").String(),
+					ThoughtSignature: sig,
+				})
+			case "redacted_thinking":
+				// Claude Extended Thinking: Redacted thinking blocks (content hidden, opaque data preserved)
+				msg.Content = append(msg.Content, ir.ContentPart{
+					Type:             ir.ContentTypeReasoning,
+					Reasoning:        "[Redacted]",
+					ThoughtSignature: []byte(block.Get("data").String()), // Preserve opaque blob for round-trip
+				})
 			case "image":
 				if source := block.Get("source"); source.Exists() && source.Get("type").String() == "base64" {
 					msg.Content = append(msg.Content, ir.ContentPart{

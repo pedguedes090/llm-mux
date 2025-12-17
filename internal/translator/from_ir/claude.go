@@ -313,6 +313,24 @@ func buildClaudeContentParts(msg ir.Message, includeToolCalls bool) []any {
 	}
 	parts := make([]any, 0, capacity)
 
+	// Check if we have thinking content
+	hasThinking := false
+	for i := range msg.Content {
+		if msg.Content[i].Type == ir.ContentTypeReasoning {
+			hasThinking = true
+			break
+		}
+	}
+
+	// Claude Protocol: If we have tool calls but no thinking, inject a placeholder thinking block
+	// This satisfies the requirement: "assistant message must start with a thinking block (preceeding tool_use)"
+	if includeToolCalls && len(msg.ToolCalls) > 0 && !hasThinking {
+		parts = append(parts, map[string]any{
+			"type":     ir.ClaudeBlockThinking,
+			"thinking": "[Thinking content not available from upstream model]",
+		})
+	}
+
 	for i := range msg.Content {
 		p := &msg.Content[i]
 		switch p.Type {

@@ -638,6 +638,26 @@ func parseOpenAIContentPart(item gjson.Result, msg *ir.Message) *ir.ContentPart 
 		if text := item.Get("text").String(); text != "" {
 			return &ir.ContentPart{Type: ir.ContentTypeText, Text: text}
 		}
+	case "thinking":
+		// Claude Extended Thinking: Parse thinking blocks from history
+		if text := item.Get("thinking").String(); text != "" {
+			var sig []byte
+			if s := item.Get("signature").String(); s != "" {
+				sig = []byte(s)
+			}
+			return &ir.ContentPart{
+				Type:             ir.ContentTypeReasoning,
+				Reasoning:        text,
+				ThoughtSignature: sig,
+			}
+		}
+	case "redacted_thinking":
+		// Claude Extended Thinking: Redacted thinking blocks (content hidden but preserved for protocol)
+		return &ir.ContentPart{
+			Type:             ir.ContentTypeReasoning,
+			Reasoning:        "[Redacted]",
+			ThoughtSignature: []byte(item.Get("data").String()), // Preserve opaque data if present
+		}
 	case "image_url":
 		if img := parseDataURI(item.Get("image_url.url").String()); img != nil {
 			return &ir.ContentPart{Type: ir.ContentTypeImage, Image: img}

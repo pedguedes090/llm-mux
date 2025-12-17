@@ -286,13 +286,11 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 			// Claude Thinking requires strict ordering: Thinking -> Text? -> ToolCalls.
 
 			parts := make([]any, 0, len(msg.Content)+len(msg.ToolCalls))
-			hasThinking := false
 
 			// 1. Process Content (Thinking/Text)
 			for _, contentPart := range msg.Content {
 				switch contentPart.Type {
 				case ir.ContentTypeReasoning:
-					hasThinking = true
 					p := map[string]any{
 						"text":    contentPart.Reasoning,
 						"thought": true,
@@ -314,17 +312,6 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 			var responseParts []any
 
 			if len(msg.ToolCalls) > 0 {
-				// Claude Constraint: If using tools, MUST start with thinking block.
-				// If history lacks thinking, we need to understand WHY and WHAT matches upstream schema.
-				isClaude := strings.Contains(req.Model, "claude")
-
-				// DEBUG TRACE: Log the state when thinking is missing for Claude with tools
-				if isClaude && !hasThinking {
-					log.Warnf("gemini-translator: [CLAUDE_TRACE] Missing thinking block for message with tool calls! Msg content len: %d", len(msg.Content))
-					// Temporary fallback: Revert to NO SHIM to inspect raw error behavior again or allow manual shim testing
-					// For now, we will NOT inject a shim to avoid signature errors, but we will log heavily.
-				}
-
 				toolCallIDs := make([]string, 0, len(msg.ToolCalls))
 
 				for i := range msg.ToolCalls {
@@ -345,18 +332,9 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 					}
 					if len(tc.ThoughtSignature) > 0 {
 						part["thoughtSignature"] = string(tc.ThoughtSignature)
-					} else if i == 0 {
-						// DEBUG TRACE: Check if this validator skip is actually needed or causing issues
-						// part["thoughtSignature"] = "skip_thought_signature_validator"
-						// Commenting out to see raw behavior
 					}
 					parts = append(parts, part)
 					toolCallIDs = append(toolCallIDs, toolID)
-				}
-
-				// If we processed real tool calls, we need to track IDs for the next turn
-				if len(toolCallIDs) > 0 {
-					// Logic to track toolCallIDs if needed for Response matching (usually handled by IR structure)
 				}
 
 				// Build Tool Results (User Response) based on IDs
