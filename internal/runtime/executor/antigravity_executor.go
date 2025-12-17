@@ -469,34 +469,43 @@ func FetchAntigravityModels(ctx context.Context, auth *cliproxyauth.Auth, cfg *c
 			}
 		}
 
-		for id := range result.Map() {
-			id = modelName2Alias(id)
-			if id != "" {
-				modelInfo := &registry.ModelInfo{
-					ID:          id,
-					Name:        id,
-					Description: id,
-					DisplayName: id,
-					Version:     id,
-					Object:      "model",
-					Created:     now,
-					OwnedBy:     antigravityAuthType,
-					Type:        antigravityAuthType,
-				}
-
-				// Inherit metadata from static model definitions if available
-				if staticModel, ok := staticModelMap[id]; ok {
-					modelInfo.Description = staticModel.Description
-					modelInfo.DisplayName = staticModel.DisplayName
-					modelInfo.Version = staticModel.Version
-					modelInfo.InputTokenLimit = staticModel.InputTokenLimit
-					modelInfo.OutputTokenLimit = staticModel.OutputTokenLimit
-					modelInfo.SupportedGenerationMethods = staticModel.SupportedGenerationMethods
-					modelInfo.Thinking = staticModel.Thinking
-				}
-
-				models = append(models, modelInfo)
+		for originalName := range result.Map() {
+			aliasName := modelName2Alias(originalName)
+			if aliasName == "" {
+				continue
 			}
+
+			modelInfo := &registry.ModelInfo{
+				ID:          aliasName,
+				Name:        aliasName,
+				Description: aliasName,
+				DisplayName: aliasName,
+				Version:     aliasName,
+				Object:      "model",
+				Created:     now,
+				OwnedBy:     antigravityAuthType,
+				Type:        antigravityAuthType,
+			}
+
+			// Set CanonicalID for Claude models to support both prefixed and non-prefixed names
+			// E.g., "gemini-claude-opus-4-5-thinking" canonical to "claude-opus-4-5-thinking"
+			if strings.HasPrefix(aliasName, "gemini-claude-") {
+				canonicalName := strings.TrimPrefix(aliasName, "gemini-")
+				modelInfo.CanonicalID = canonicalName
+			}
+
+			// Inherit metadata from static model definitions if available
+			if staticModel, ok := staticModelMap[aliasName]; ok {
+				modelInfo.Description = staticModel.Description
+				modelInfo.DisplayName = staticModel.DisplayName
+				modelInfo.Version = staticModel.Version
+				modelInfo.InputTokenLimit = staticModel.InputTokenLimit
+				modelInfo.OutputTokenLimit = staticModel.OutputTokenLimit
+				modelInfo.SupportedGenerationMethods = staticModel.SupportedGenerationMethods
+				modelInfo.Thinking = staticModel.Thinking
+			}
+
+			models = append(models, modelInfo)
 		}
 		return models
 	}
