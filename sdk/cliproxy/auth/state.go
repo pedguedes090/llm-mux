@@ -261,7 +261,6 @@ func propagateQuotaToGroup(auth *Auth, sourceModel string, quota QuotaState, nex
 			continue
 		}
 
-		// Use cached group from extractModelFamily (no mutex, no allocations for simple case)
 		modelGroup := ResolveQuotaGroup(auth.Provider, modelID)
 		if modelGroup != quotaGroup {
 			continue

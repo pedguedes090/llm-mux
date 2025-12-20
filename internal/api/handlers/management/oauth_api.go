@@ -545,7 +545,6 @@ exchangeToken:
 	if tokenResp.AccessToken != "" {
 		if fetchedProjectID, errProject := fetchAntigravityProjectID(ctx, tokenResp.AccessToken, httpClient); errProject == nil {
 			projectID = fetchedProjectID
-			log.Infof("antigravity: obtained project ID %s", projectID)
 		}
 	}
 
@@ -632,12 +631,13 @@ func exchangeAntigravityCode(ctx context.Context, code, redirectURI string, http
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("oauth token exchange failed: status %d", resp.StatusCode)
+	}
+
 	var token antigravityTokenResponse
 	if errDecode := json.NewDecoder(resp.Body).Decode(&token); errDecode != nil {
 		return nil, errDecode
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("oauth token exchange failed: status %d", resp.StatusCode)
 	}
 	return &token, nil
 }
