@@ -35,6 +35,9 @@ var stringBuilderPool = sync.Pool{
 	},
 }
 
+// TokenEstimationThreshold is the character count limit above which we switch to estimation
+const TokenEstimationThreshold = 100_000
+
 func CountTiktokenTokens(model string, req *ir.UnifiedChatRequest) int64 {
 	if req == nil {
 		return 0
@@ -54,43 +57,198 @@ func CountTiktokenTokens(model string, req *ir.UnifiedChatRequest) int64 {
 		totalTokens += countTokens(enc, req.Instructions) + tokensPerMessage
 	}
 
+	sb := stringBuilderPool.Get().(*strings.Builder)
+	defer stringBuilderPool.Put(sb)
+
 	for i := range req.Messages {
+		msg := &req.Messages[i]
 		totalTokens += tokensPerMessage
+		totalTokens += countRoleTokens(enc, string(msg.Role))
 
-		totalTokens += countRoleTokens(enc, string(req.Messages[i].Role))
+		sb.Reset()
+		hasContentToCount := false
 
-		contentStr, imageCount, docCount, audioCount, videoCount := irMessageToStringPooled(&req.Messages[i])
-		if contentStr != "" {
-			totalTokens += countTokens(enc, contentStr)
-		}
-		totalTokens += int64(imageCount*ImageTokenCostOpenAI +
-			docCount*DocTokenCost +
-			audioCount*AudioTokenCost +
-			videoCount*VideoTokenCost)
-	}
+		// Process content parts
+		// We stream parts into the tokenizer buffer, but switch to direct estimation
+		// for large chunks to avoid memory spikes and tokenizer overhead.
+		for j := range msg.Content {
+			part := &msg.Content[j]
+			switch part.Type {
+			case ir.ContentTypeText:
+				if len(part.Text) > TokenEstimationThreshold {
+					if sb.Len() > 0 {
+						totalTokens += countTokens(enc, sb.String())
+						sb.Reset()
+					}
+					// Estimate large text directly
+					totalTokens += estimateTokens(part.Text)
+					hasContentToCount = false
+				} else if part.Text != "" {
+					sb.WriteString(part.Text)
+					hasContentToCount = true
+				}
 
-	if len(req.Tools) > 0 {
-		totalTokens += countJSONTokens(enc, req.Tools) + 10
-	}
+			case ir.ContentTypeReasoning:
+				if len(part.Reasoning) > TokenEstimationThreshold {
+					if sb.Len() > 0 {
+						totalTokens += countTokens(enc, sb.String())
+						sb.Reset()
+					}
+					totalTokens += estimateTokens(part.Reasoning)
+					hasContentToCount = false
+				} else if part.Reasoning != "" {
+					sb.WriteString(part.Reasoning)
+					hasContentToCount = true
+				}
+				if len(part.ThoughtSignature) > 0 {
+					sb.Write(part.ThoughtSignature)
+					hasContentToCount = true
+				}
 
-	if len(req.MCPServers) > 0 {
-		totalTokens += countJSONTokens(enc, req.MCPServers) + 20
-	}
+			case ir.ContentTypeCodeResult:
+				if part.CodeExecution != nil && part.CodeExecution.Output != "" {
+					if len(part.CodeExecution.Output) > TokenEstimationThreshold {
+						if sb.Len() > 0 {
+							totalTokens += countTokens(enc, sb.String())
+							sb.Reset()
+						}
+						totalTokens += estimateTokens(part.CodeExecution.Output)
+						hasContentToCount = false
+					} else {
+						sb.WriteString(part.CodeExecution.Output)
+						hasContentToCount = true
+					}
+				}
 
-	if req.Metadata != nil {
-		for _, key := range []string{ir.MetaGoogleSearch, ir.MetaClaudeComputer, ir.MetaClaudeBash, ir.MetaClaudeTextEditor} {
-			if val, ok := req.Metadata[key]; ok {
-				totalTokens += countJSONTokens(enc, val) + 15
+			case ir.ContentTypeExecutableCode:
+				if part.CodeExecution != nil && part.CodeExecution.Code != "" {
+					if len(part.CodeExecution.Code) > TokenEstimationThreshold {
+						if sb.Len() > 0 {
+							totalTokens += countTokens(enc, sb.String())
+							sb.Reset()
+						}
+						totalTokens += estimateTokens(part.CodeExecution.Code)
+						hasContentToCount = false
+					} else {
+						sb.WriteString(part.CodeExecution.Code)
+						hasContentToCount = true
+					}
+				}
+
+			case ir.ContentTypeImage:
+				if part.Image != nil {
+					totalTokens += ImageTokenCostOpenAI
+				}
+
+			case ir.ContentTypeFile:
+				if part.File != nil {
+					// Handle FileData (potentially huge)
+					if part.File.FileData != "" {
+						if len(part.File.FileData) > TokenEstimationThreshold {
+							if sb.Len() > 0 {
+								totalTokens += countTokens(enc, sb.String())
+								sb.Reset()
+							}
+							totalTokens += estimateTokens(part.File.FileData)
+							hasContentToCount = false
+						} else {
+							sb.WriteString(part.File.FileData)
+							hasContentToCount = true
+						}
+					} else if part.File.FileURL != "" || part.File.FileID != "" {
+						totalTokens += DocTokenCost
+					}
+				}
+
+			case ir.ContentTypeAudio:
+				if part.Audio != nil {
+					if part.Audio.Transcript != "" {
+						sb.WriteString(part.Audio.Transcript)
+						hasContentToCount = true
+					}
+					totalTokens += AudioTokenCost
+				}
+
+			case ir.ContentTypeVideo:
+				if part.Video != nil {
+					totalTokens += VideoTokenCost
+				}
+
+			case ir.ContentTypeToolResult:
+				if part.ToolResult != nil {
+					// Tool result formatting involves mixed content, handle carefully
+					// Simplified: just estimate if result is huge
+					if len(part.ToolResult.Result) > TokenEstimationThreshold {
+						if sb.Len() > 0 {
+							totalTokens += countTokens(enc, sb.String())
+							sb.Reset()
+						}
+						sb.WriteString("\nTool ")
+						sb.WriteString(part.ToolResult.ToolCallID)
+						sb.WriteString(" result: ")
+						// Flush header
+						totalTokens += countTokens(enc, sb.String())
+						sb.Reset()
+
+						totalTokens += estimateTokens(part.ToolResult.Result)
+						hasContentToCount = false
+					} else {
+						sb.WriteString("\nTool ")
+						sb.WriteString(part.ToolResult.ToolCallID)
+						sb.WriteString(" result: ")
+						sb.WriteString(part.ToolResult.Result)
+						hasContentToCount = true
+					}
+					totalTokens += int64(len(part.ToolResult.Images) * ImageTokenCostOpenAI)
+				}
 			}
 		}
-	}
 
-	totalTokens += 3
+		// Process tool calls
+		for j := range msg.ToolCalls {
+			tc := &msg.ToolCalls[j]
+			sb.WriteString("\nCall tool ")
+			sb.WriteString(tc.Name)
+			sb.WriteByte('(')
+			if len(tc.Args) > TokenEstimationThreshold {
+				// Flush prefix
+				totalTokens += countTokens(enc, sb.String())
+				sb.Reset()
+
+				totalTokens += estimateTokens(tc.Args)
+				sb.WriteByte(')')
+				// Flush suffix
+				totalTokens += countTokens(enc, sb.String())
+				sb.Reset()
+				hasContentToCount = false
+			} else {
+				sb.WriteString(tc.Args)
+				sb.WriteByte(')')
+				hasContentToCount = true
+			}
+		}
+
+		// Final flush for this message
+		if hasContentToCount && sb.Len() > 0 {
+			totalTokens += countTokens(enc, sb.String())
+		}
+
+	}
 
 	return totalTokens
 }
 
+// estimateTokens returns a fast approximation of token count for large strings
+// Uses divisor 3.5 to approximate common token densities without overhead
+func estimateTokens(s string) int64 {
+	return int64(float64(len(s)) / 3.5)
+}
+
 func countTokens(enc tokenizer.Codec, s string) int64 {
+	// Only use estimation for very large strings to avoid memory issues
+	if len(s) > TokenEstimationThreshold { // Use same threshold as everywhere else
+		return estimateTokens(s)
+	}
 	ids, _, _ := enc.Encode(s)
 	return int64(len(ids))
 }
@@ -99,6 +257,11 @@ func countJSONTokens(enc tokenizer.Codec, v any) int64 {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return 0
+	}
+	if len(data) > TokenEstimationThreshold {
+		// Use higher divisor for JSON as it has structural overhead (quotes, braces)
+		// that inflates char count but often tokenizes efficiently
+		return int64(float64(len(data)) / 4.0)
 	}
 	ids, _, _ := enc.Encode(string(data))
 	return int64(len(ids))
@@ -165,82 +328,4 @@ func getTiktokenEncodingName(model string) tokenizer.Encoding {
 	default:
 		return tokenizer.O200kBase
 	}
-}
-
-func irMessageToStringPooled(msg *ir.Message) (string, int, int, int, int) {
-	sb := stringBuilderPool.Get().(*strings.Builder)
-	sb.Reset()
-	defer stringBuilderPool.Put(sb)
-
-	imageCount := 0
-	docCount := 0
-	audioCount := 0
-	videoCount := 0
-
-	for i := range msg.Content {
-		part := &msg.Content[i]
-		switch part.Type {
-		case ir.ContentTypeText:
-			if part.Text != "" {
-				sb.WriteString(part.Text)
-			}
-		case ir.ContentTypeReasoning:
-			if part.Reasoning != "" {
-				sb.WriteString(part.Reasoning)
-			}
-			if len(part.ThoughtSignature) > 0 {
-				sb.Write(part.ThoughtSignature)
-			}
-		case ir.ContentTypeCodeResult:
-			if part.CodeExecution != nil && part.CodeExecution.Output != "" {
-				sb.WriteString(part.CodeExecution.Output)
-			}
-		case ir.ContentTypeExecutableCode:
-			if part.CodeExecution != nil && part.CodeExecution.Code != "" {
-				sb.WriteString(part.CodeExecution.Code)
-			}
-		case ir.ContentTypeImage:
-			if part.Image != nil {
-				imageCount++
-			}
-		case ir.ContentTypeFile:
-			if part.File != nil {
-				if part.File.FileData != "" {
-					sb.WriteString(part.File.FileData)
-				} else if part.File.FileURL != "" || part.File.FileID != "" {
-					docCount++
-				}
-			}
-		case ir.ContentTypeAudio:
-			if part.Audio != nil {
-				if part.Audio.Transcript != "" {
-					sb.WriteString(part.Audio.Transcript)
-				}
-				audioCount++
-			}
-		case ir.ContentTypeVideo:
-			if part.Video != nil {
-				videoCount++
-			}
-		case ir.ContentTypeToolResult:
-			if part.ToolResult != nil {
-				sb.WriteString("\nTool ")
-				sb.WriteString(part.ToolResult.ToolCallID)
-				sb.WriteString(" result: ")
-				sb.WriteString(part.ToolResult.Result)
-				imageCount += len(part.ToolResult.Images)
-			}
-		}
-	}
-
-	for i := range msg.ToolCalls {
-		tc := &msg.ToolCalls[i]
-		sb.WriteString("\nCall tool ")
-		sb.WriteString(tc.Name)
-		sb.WriteByte('(')
-		sb.WriteString(tc.Args)
-		sb.WriteByte(')')
-	}
-
-	return sb.String(), imageCount, docCount, audioCount, videoCount
 }

@@ -189,8 +189,15 @@ func normalizeModel(model string) string {
 }
 
 // isGeminiModel checks if the model name corresponds to a Gemini model.
+// Returns false for Claude models proxied through Gemini (e.g., "gemini-claude-opus-4-5-thinking")
+// since those should use Claude's tokenizer for accurate counting.
 func isGeminiModel(model string) bool {
-	return strings.Contains(strings.ToLower(model), "gemini")
+	lower := strings.ToLower(model)
+	// Claude models (even when proxied as gemini-claude-*) should use tiktoken
+	if strings.Contains(lower, "claude") {
+		return false
+	}
+	return strings.Contains(lower, "gemini")
 }
 
 // buildContentsFromIR converts IR messages to genai.Content slice for token counting.

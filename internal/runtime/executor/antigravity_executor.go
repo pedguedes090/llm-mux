@@ -29,7 +29,7 @@ import (
 )
 
 // Note: This executor uses the canonical translator (TranslateToGeminiCLI) for request/response translation.
-// The "antigravity" format is used for upstream communication with the Google Cloud Code API.
+// The "antigravity" format is used for upstream communication with the google antigravity.
 
 const (
 	antigravityBaseURLDaily = "https://daily-cloudcode-pa.sandbox.googleapis.com"
@@ -455,7 +455,7 @@ func FetchAntigravityModels(ctx context.Context, auth *cliproxyauth.Auth, cfg *c
 		models := make([]*registry.ModelInfo, 0, len(result.Map()))
 
 		// Build a lookup map from static Gemini model definitions to inherit
-		// Thinking support and other metadata. Antigravity uses Google Cloud Code API
+		// Thinking support and other metadata. Antigravity uses google antigravity
 		// which serves the same Gemini models, so we reuse GetGeminiCLIModels() definitions.
 		staticModels := registry.GetGeminiCLIModels()
 		staticModelMap := make(map[string]*registry.ModelInfo, len(staticModels))

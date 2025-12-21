@@ -420,7 +420,7 @@ func GetGeminiCLIModels() []*ModelInfo {
 			SupportedGenerationMethods: []string{"generateContent", "countTokens", "createCachedContent", "batchGenerateContent"},
 			Thinking:                   &ThinkingSupport{Min: 128, Max: 32768, ZeroAllowed: false, DynamicAllowed: true},
 		},
-		// Claude models via Antigravity (Google Cloud Code API)
+		// Claude models via Antigravity (google antigravity)
 		// Use canonical names directly (no gemini- prefix) for simpler routing
 		{
 			ID:                         "claude-sonnet-4-5",
@@ -432,7 +432,7 @@ func GetGeminiCLIModels() []*ModelInfo {
 			Name:                       "claude-sonnet-4-5",
 			Version:                    "4.5",
 			DisplayName:                "Claude Sonnet 4.5",
-			Description:                "Claude Sonnet 4.5 via Google Cloud Code API",
+			Description:                "Claude Sonnet 4.5 via google antigravity",
 			InputTokenLimit:            200000,
 			OutputTokenLimit:           64000,
 			SupportedGenerationMethods: []string{"generateContent"},
@@ -447,7 +447,7 @@ func GetGeminiCLIModels() []*ModelInfo {
 			Name:                       "claude-sonnet-4-5-thinking",
 			Version:                    "4.5",
 			DisplayName:                "Claude Sonnet 4.5 Thinking",
-			Description:                "Claude Sonnet 4.5 with extended thinking via Google Cloud Code API",
+			Description:                "Claude Sonnet 4.5 with extended thinking via google antigravity",
 			InputTokenLimit:            200000,
 			OutputTokenLimit:           64000,
 			SupportedGenerationMethods: []string{"generateContent"},
@@ -463,7 +463,7 @@ func GetGeminiCLIModels() []*ModelInfo {
 			Name:                       "claude-opus-4-5-thinking",
 			Version:                    "4.5",
 			DisplayName:                "Claude Opus 4.5 Thinking",
-			Description:                "Claude Opus 4.5 with extended thinking via Google Cloud Code API",
+			Description:                "Claude Opus 4.5 with extended thinking via google antigravity",
 			InputTokenLimit:            200000,
 			OutputTokenLimit:           64000,
 			SupportedGenerationMethods: []string{"generateContent"},
