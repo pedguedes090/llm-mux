@@ -13,7 +13,7 @@ services:
     environment:
       TZ: ${TZ:-UTC}
     ports:
-      - "8318:8318"
+      - "8317:8317"
     volumes:
       - ./config.yaml:/llm-mux/config.yaml
       - ./auths:/root/.llm-mux
