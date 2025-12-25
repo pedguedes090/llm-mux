@@ -1,8 +1,10 @@
 package embedded
 
-import _ "embed"
+import (
+	_ "embed"
+)
 
-// DefaultConfigTemplate contains the embedded config.example.yaml template.
-// To update: copy config.example.yaml from project root to this directory.
+// DefaultConfigTemplate contains the embedded config.example.yaml template from project root.
+//
 //go:embed config.example.yaml
 var DefaultConfigTemplate []byte
