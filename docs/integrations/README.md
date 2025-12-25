@@ -107,6 +107,55 @@ require("avante").setup({
 
 ## CLI Tools
 
+### OpenCode
+
+OpenCode supports custom providers via `opencode.json`. Create or edit `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "model": "llm-mux/claude-sonnet-4",
+  "provider": {
+    "llm-mux": {
+      "npm": "@ai-sdk/anthropic",
+      "name": "LLM-Mux",
+      "options": {
+        "baseURL": "http://localhost:8317/v1",
+        "apiKey": "unused"
+      },
+      "models": {
+        "claude-sonnet-4": {
+          "id": "claude-sonnet-4",
+          "name": "Claude Sonnet 4",
+          "tool_call": true,
+          "reasoning": true
+        },
+        "gemini-2.5-pro": {
+          "id": "gemini-2.5-pro",
+          "name": "Gemini 2.5 Pro",
+          "tool_call": true
+        }
+      }
+    }
+  }
+}
+```
+
+For Gemini native format, use `@ai-sdk/google` with `/v1beta`:
+
+```json
+{
+  "provider": {
+    "llm-mux-gemini": {
+      "npm": "@ai-sdk/google",
+      "options": {
+        "baseURL": "http://localhost:8317/v1beta",
+        "apiKey": "unused"
+      }
+    }
+  }
+}
+```
+
 ### Aider
 
 ```bash
