@@ -89,9 +89,8 @@ func (p *GeminiProvider) applyGenerationConfig(root map[string]any, req *ir.Unif
 	}
 
 	isGemini3 := ir.IsGemini3(req.Model)
-	isClaude := ir.IsClaude(req.Model)
 
-	p.applyThinkingConfig(genConfig, req, isGemini3, isClaude)
+	p.applyThinkingConfig(genConfig, req, isGemini3)
 
 	if len(req.ResponseModality) > 0 {
 		genConfig["responseModalities"] = req.ResponseModality
@@ -954,33 +953,40 @@ func buildFunctionResponseObject(result string, isError bool) any {
 	return map[string]any{"content": result}
 }
 
-func (p *GeminiProvider) applyThinkingConfig(genConfig map[string]any, req *ir.UnifiedChatRequest, isGemini3, isClaude bool) {
+func (p *GeminiProvider) applyThinkingConfig(genConfig map[string]any, req *ir.UnifiedChatRequest, isGemini3 bool) {
+	// Get auto config from registry - only models with Thinking metadata get auto=true
 	budget, include, auto := util.GetAutoAppliedThinkingConfig(req.Model)
 
-	if isClaude {
-		if req.Thinking != nil && req.Thinking.ThinkingBudget == nil {
-			b := int32(ir.DefaultThinkingBudgetTokens)
-			req.Thinking.ThinkingBudget = &b
-		}
-		if len(req.Tools) == 0 {
-			auto = true
-			include = true
-			if budget <= 0 {
-				budget = ir.DefaultThinkingBudgetTokens
-			}
-		} else {
-			auto = false
-		}
-	}
-
+	// Apply thinking if:
+	// 1. User explicitly provided thinking config (req.Thinking != nil), OR
+	// 2. Model supports thinking and auto-enable is set (auto=true from registry)
 	if req.Thinking == nil && !auto {
 		return
+	}
+
+	// Use registry defaults, but override with user's explicit config
+	effectiveBudget := budget
+	effectiveInclude := include
+
+	if req.Thinking != nil {
+		if req.Thinking.ThinkingBudget != nil {
+			effectiveBudget = int(*req.Thinking.ThinkingBudget)
+		}
+		effectiveInclude = req.Thinking.IncludeThoughts
+	}
+
+	// Ensure valid budget for models that require it
+	if effectiveBudget <= 0 {
+		effectiveBudget = ir.DefaultThinkingBudgetTokens
 	}
 
 	if isGemini3 {
 		p.applyGemini3ThinkingConfig(genConfig, req)
 	} else {
-		p.applyLegacyThinkingConfig(genConfig, req, budget, include)
+		genConfig["thinkingConfig"] = map[string]any{
+			"thinkingBudget":  effectiveBudget,
+			"includeThoughts": effectiveInclude,
+		}
 	}
 
 	p.adjustMaxTokensForThinking(genConfig, req)
@@ -1001,23 +1007,6 @@ func (p *GeminiProvider) applyGemini3ThinkingConfig(genConfig map[string]any, re
 
 	tc["thinkingLevel"] = thinkingLevel
 	genConfig["thinkingConfig"] = tc
-}
-
-func (p *GeminiProvider) applyLegacyThinkingConfig(genConfig map[string]any, req *ir.UnifiedChatRequest, budget int, include bool) {
-	effectiveBudget := budget
-	if req.Thinking != nil && req.Thinking.ThinkingBudget != nil {
-		effectiveBudget = int(*req.Thinking.ThinkingBudget)
-	}
-
-	effectiveInclude := include
-	if req.Thinking != nil {
-		effectiveInclude = req.Thinking.IncludeThoughts
-	}
-
-	genConfig["thinkingConfig"] = map[string]any{
-		"thinkingBudget":  effectiveBudget,
-		"includeThoughts": effectiveInclude,
-	}
 }
 
 func (p *GeminiProvider) adjustMaxTokensForThinking(genConfig map[string]any, req *ir.UnifiedChatRequest) {
