@@ -865,16 +865,17 @@ func emitToolCallTo(result *strings.Builder, tc *ir.ToolCall, state *ClaudeStrea
 
 // emitFinishTo writes finish SSE to builder.
 func emitFinishTo(result *strings.Builder, usage *ir.Usage, state *ClaudeStreamState) {
+	// Close any open content block first (required by Claude SSE spec)
+	if state != nil && state.TextBlockStarted {
+		result.WriteString(formatSSE(ir.ClaudeSSEContentBlockStop, map[string]any{
+			"type": ir.ClaudeSSEContentBlockStop, "index": state.TextBlockIndex,
+		}))
+		state.TextBlockStarted = false
+		state.TextBlockIndex++
+	}
+
 	// Client requirement: If we only emitted thinking (no text, no tool calls), inject empty text block
 	if state != nil && !state.HasTextContent && !state.HasToolCalls {
-		// Close thinking block if open
-		if state.TextBlockStarted {
-			result.WriteString(formatSSE(ir.ClaudeSSEContentBlockStop, map[string]any{
-				"type": ir.ClaudeSSEContentBlockStop, "index": state.TextBlockIndex,
-			}))
-			state.TextBlockStarted = false
-			state.TextBlockIndex++
-		}
 		// Emit text block with space (some clients reject truly empty text)
 		idx := state.TextBlockIndex
 		result.WriteString(formatSSE(ir.ClaudeSSEContentBlockStart, map[string]any{
