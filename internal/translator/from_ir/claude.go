@@ -96,14 +96,16 @@ func (p *ClaudeProvider) ConvertRequest(req *ir.UnifiedChatRequest) ([]byte, err
 	}
 
 	// Check if thinking is enabled for this request
+	// CRITICAL: Must match the actual thinking config sent to Claude API
+	// If thinking.type = "disabled" (budget=0, IncludeThoughts=false), we MUST strip thinking blocks from history
 	thinkingEnabled := false
 	if req.Thinking != nil {
-		// Relaxed check: if Thinking struct exists, we likely need to comply
-		thinkingEnabled = true
-	}
-	// Force enable for known thinking models to ensure protocol compliance in history
-	if ir.IsThinkingModel(req.Model) {
-		thinkingEnabled = true
+		// Only enable if IncludeThoughts is true AND budget is non-zero
+		budget := int32(0)
+		if req.Thinking.ThinkingBudget != nil {
+			budget = *req.Thinking.ThinkingBudget
+		}
+		thinkingEnabled = req.Thinking.IncludeThoughts && budget != 0
 	}
 
 	messages := make([]any, 0, len(req.Messages))
