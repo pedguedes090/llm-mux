@@ -18,10 +18,8 @@ import (
 	"github.com/nghyane/llm-mux/internal/oauth"
 	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
-	"github.com/nghyane/llm-mux/internal/util"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/singleflight"
 )
@@ -495,27 +493,6 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *provider.A
 	payload = geminiToAntigravity(modelName, payload, projectID)
 	payload, _ = sjson.SetBytes(payload, "model", alias2ModelName(modelName))
 
-	if strings.Contains(modelName, "claude") {
-		strJSON := string(payload)
-		paths := make([]string, 0)
-		util.Walk(gjson.ParseBytes(payload), "", "parametersJsonSchema", &paths)
-		for _, p := range paths {
-			strJSON, _ = util.RenameKey(strJSON, p, p[:len(p)-len("parametersJsonSchema")]+"parameters")
-		}
-
-		strJSON = util.DeleteKey(strJSON, "$schema")
-		strJSON = util.DeleteKey(strJSON, "maxItems")
-		strJSON = util.DeleteKey(strJSON, "minItems")
-		strJSON = util.DeleteKey(strJSON, "minLength")
-		strJSON = util.DeleteKey(strJSON, "maxLength")
-		strJSON = util.DeleteKey(strJSON, "exclusiveMinimum")
-		strJSON = util.DeleteKey(strJSON, "exclusiveMaximum")
-		strJSON = util.DeleteKey(strJSON, "$ref")
-		strJSON = util.DeleteKey(strJSON, "$defs")
-
-		payload = []byte(strJSON)
-	}
-
 	httpReq, errReq := http.NewRequestWithContext(ctx, http.MethodPost, ub.String(), bytes.NewReader(payload))
 	if errReq != nil {
 		return nil, errReq
@@ -698,9 +675,6 @@ func geminiToAntigravity(modelName string, payload []byte, projectID string) []b
 									if paramsSchema, exists := funcDeclMap["parametersJsonSchema"]; exists {
 										funcDeclMap["parameters"] = paramsSchema
 										delete(funcDeclMap, "parametersJsonSchema")
-										if params, ok := funcDeclMap["parameters"].(map[string]interface{}); ok {
-											delete(params, "$schema")
-										}
 									}
 								}
 							}
@@ -714,20 +688,6 @@ func geminiToAntigravity(modelName string, payload []byte, projectID string) []b
 	result, err := json.Marshal(data)
 	if err != nil {
 		return payload
-	}
-
-	if strings.Contains(modelName, "claude") {
-		strJSON := string(result)
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.$schema")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.$ref")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.$defs")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.exclusiveMinimum")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.exclusiveMaximum")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.minItems")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.maxItems")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.minLength")
-		strJSON = util.DeleteKey(strJSON, "request.tools.#.functionDeclarations.#.parameters.maxLength")
-		result = []byte(strJSON)
 	}
 
 	return result

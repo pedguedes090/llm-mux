@@ -101,6 +101,13 @@ func TranslateToGeminiCLIWithTokens(cfg *config.Config, from provider.Format, mo
 				irReq.Model = thinkingModel
 			}
 		}
+
+		if irReq.MaxTokens == nil || *irReq.MaxTokens == 0 {
+			defaultMax := ir.ClaudeDefaultMaxTokens
+			irReq.MaxTokens = &defaultMax
+		}
+
+		ir.CleanToolsForAntigravityClaude(irReq)
 	}
 
 	geminiJSON, err := (&from_ir.GeminiCLIProvider{}).ConvertRequest(irReq)

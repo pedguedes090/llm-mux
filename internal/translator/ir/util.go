@@ -831,3 +831,31 @@ func cleanSchemaForClaudeRecursive(schema map[string]any) {
 		cleanSchemaForClaudeRecursive(contains)
 	}
 }
+
+// CleanToolsForAntigravityClaude cleans all tool parameter schemas for Claude models
+// accessed via Antigravity provider. Unlike CleanJsonSchemaForClaude, this does NOT
+// add $schema field since Antigravity rejects it.
+func CleanToolsForAntigravityClaude(req *UnifiedChatRequest) {
+	if req == nil {
+		return
+	}
+	for i := range req.Tools {
+		if req.Tools[i].Parameters != nil {
+			params := CopyMap(req.Tools[i].Parameters)
+			params = CleanJsonSchema(params)
+			cleanSchemaForClaudeRecursive(params)
+			params["additionalProperties"] = false
+			delete(params, "$schema")
+			req.Tools[i].Parameters = params
+		}
+	}
+
+	if req.ResponseSchema != nil {
+		schema := CopyMap(req.ResponseSchema)
+		schema = CleanJsonSchema(schema)
+		cleanSchemaForClaudeRecursive(schema)
+		schema["additionalProperties"] = false
+		delete(schema, "$schema")
+		req.ResponseSchema = schema
+	}
+}
