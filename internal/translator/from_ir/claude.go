@@ -97,6 +97,7 @@ func (p *ClaudeProvider) ConvertRequest(req *ir.UnifiedChatRequest) ([]byte, err
 				msgs = append(msgs, obj)
 			}
 		case ir.RoleTool:
+			var toolResults []any
 			for _, p := range m.Content {
 				if p.Type == ir.ContentTypeToolResult && p.ToolResult != nil {
 					tr := map[string]any{"type": ir.ClaudeBlockToolResult, "tool_use_id": p.ToolResult.ToolCallID}
@@ -138,8 +139,11 @@ func (p *ClaudeProvider) ConvertRequest(req *ir.UnifiedChatRequest) ([]byte, err
 					} else {
 						tr["content"] = p.ToolResult.Result
 					}
-					msgs = append(msgs, map[string]any{"role": ir.ClaudeRoleUser, "content": []any{tr}})
+					toolResults = append(toolResults, tr)
 				}
+			}
+			if len(toolResults) > 0 {
+				msgs = append(msgs, map[string]any{"role": ir.ClaudeRoleUser, "content": toolResults})
 			}
 		}
 	}

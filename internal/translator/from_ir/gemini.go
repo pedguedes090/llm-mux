@@ -539,8 +539,18 @@ func (p *VertexEnvelopeProvider) buildClaudeInnerRequest(req *ir.UnifiedChatRequ
 }
 
 func (p *VertexEnvelopeProvider) buildClaudeContents(req *ir.UnifiedChatRequest) []any {
-	var contents []any
-	toolIDToName, toolResults := ir.BuildToolMaps(req.Messages)
+	if len(req.Messages) == 0 {
+		return nil
+	}
+
+	toolIDToName, _ := ir.BuildToolMaps(req.Messages)
+
+	type coalescedMsg struct {
+		role         string
+		parts        []any
+		cacheControl *ir.CacheControl
+	}
+	var messages []coalescedMsg
 
 	for i := range req.Messages {
 		msg := &req.Messages[i]
@@ -548,31 +558,53 @@ func (p *VertexEnvelopeProvider) buildClaudeContents(req *ir.UnifiedChatRequest)
 			continue
 		}
 
+		var role string
+		var msgParts []any
+
 		switch msg.Role {
 		case ir.RoleUser:
+			role = "user"
 			userParts := parts.BuildUserParts(msg.Content)
-			if len(userParts) > 0 {
-				content := map[string]any{"role": "user", "parts": userParts}
-				if msg.CacheControl != nil {
-					content["cacheControl"] = buildCacheControlMap(msg.CacheControl)
-				}
-				contents = append(contents, content)
-			}
+			toolResultParts := p.buildClaudeToolResultParts(msg, toolIDToName)
+			msgParts = append(userParts, toolResultParts...)
 		case ir.RoleAssistant:
-			modelParts := p.buildClaudeAssistantParts(msg, toolIDToName, toolResults)
-			if len(modelParts) > 0 {
-				content := map[string]any{"role": "model", "parts": modelParts}
-				if msg.CacheControl != nil {
-					content["cacheControl"] = buildCacheControlMap(msg.CacheControl)
-				}
-				contents = append(contents, content)
-			}
+			role = "model"
+			msgParts = p.buildClaudeAssistantParts(msg)
 		case ir.RoleTool:
-			responseParts := p.buildClaudeToolResultParts(msg, toolIDToName)
-			if len(responseParts) > 0 {
-				contents = append(contents, map[string]any{"role": "user", "parts": responseParts})
-			}
+			role = "user"
+			msgParts = p.buildClaudeToolResultParts(msg, toolIDToName)
 		}
+
+		if len(msgParts) == 0 {
+			continue
+		}
+
+		if len(messages) > 0 && messages[len(messages)-1].role == role {
+			last := &messages[len(messages)-1]
+			last.parts = append(last.parts, msgParts...)
+			if msg.CacheControl != nil {
+				last.cacheControl = msg.CacheControl
+			}
+		} else {
+			messages = append(messages, coalescedMsg{
+				role:         role,
+				parts:        msgParts,
+				cacheControl: msg.CacheControl,
+			})
+		}
+	}
+
+	if len(messages) == 0 {
+		return nil
+	}
+
+	contents := make([]any, len(messages))
+	for i, m := range messages {
+		content := map[string]any{"role": m.role, "parts": m.parts}
+		if m.cacheControl != nil {
+			content["cacheControl"] = buildCacheControlMap(m.cacheControl)
+		}
+		contents[i] = content
 	}
 
 	return contents
@@ -586,7 +618,7 @@ func buildCacheControlMap(cc *ir.CacheControl) map[string]any {
 	return result
 }
 
-func (p *VertexEnvelopeProvider) buildClaudeAssistantParts(msg *ir.Message, toolIDToName map[string]string, toolResults map[string]*ir.ToolResultPart) []any {
+func (p *VertexEnvelopeProvider) buildClaudeAssistantParts(msg *ir.Message) []any {
 	var parts []any
 
 	for i := range msg.Content {
