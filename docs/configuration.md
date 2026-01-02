@@ -136,7 +136,32 @@ providers:
 
 ## Environment Variables
 
-Cloud deployment options:
+Environment variables override config file values.
+
+### Core Settings
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `LLM_MUX_PORT` | Server port | `8317` |
+| `LLM_MUX_DEBUG` | Enable debug logging | `true` |
+| `LLM_MUX_DISABLE_AUTH` | Disable API key authentication | `true` |
+| `LLM_MUX_API_KEYS` | Comma-separated API keys | `key1,key2,key3` |
+
+### Usage Statistics
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `LLM_MUX_USAGE_DSN` | Database connection string | `sqlite://~/.config/llm-mux/usage.db` |
+| `LLM_MUX_USAGE_RETENTION_DAYS` | Days to keep usage records | `30` |
+
+### Management API
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `LLM_MUX_MANAGEMENT_KEY` | Management API key | `your-secret-key` |
+| `MANAGEMENT_PASSWORD` | Alternative management key | `your-secret-key` |
+
+### Cloud Storage (for multi-instance deployments)
 
 ```bash
 # PostgreSQL token store
@@ -216,15 +241,16 @@ routing:
 ## Usage Statistics
 
 ```yaml
-usage-statistics-enabled: true
-
-usage-persistence:
-  enabled: true
-  db-path: "~/.config/llm-mux/usage.db"
-  batch-size: 100           # Records per batch write
-  flush-interval: 60        # Seconds between flushes
-  retention-days: 30        # Days to keep records
+usage:
+  dsn: "sqlite://~/.config/llm-mux/usage.db"  # or postgres://...
+  batch-size: 100             # Records per batch write
+  flush-interval: "5s"        # Duration between flushes
+  retention-days: 30          # Days to keep records
 ```
+
+Supported database backends:
+- `sqlite:///path/to/db.sqlite` — Local SQLite (default)
+- `postgres://user:pass@host:5432/db` — PostgreSQL
 
 ---
 
