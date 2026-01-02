@@ -394,7 +394,7 @@ func (e *AntigravityExecutor) buildCountTokensRequest(ctx context.Context, token
 }
 
 func FetchAntigravityModels(ctx context.Context, auth *provider.Auth, cfg *config.Config) []*registry.ModelInfo {
-	exec := &AntigravityExecutor{cfg: cfg}
+	exec := NewAntigravityExecutor(cfg)
 	token, updatedAuth, errToken := exec.ensureAccessToken(ctx, auth)
 	if errToken != nil || token == "" {
 		return nil
