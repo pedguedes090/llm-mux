@@ -12,12 +12,12 @@ import (
 
 	vertexauth "github.com/nghyane/llm-mux/internal/auth/vertex"
 	"github.com/nghyane/llm-mux/internal/config"
+	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/tidwall/sjson"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -164,7 +164,7 @@ func (e *GeminiVertexExecutor) executeWithStrategy(ctx context.Context, auth *pr
 	if errNewReq != nil {
 		return resp, errNewReq
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 
 	token, errTok := strategy.GetToken(ctx, e.cfg, auth)
 	if errTok != nil {
@@ -242,7 +242,7 @@ func (e *GeminiVertexExecutor) executeStreamWithStrategy(ctx context.Context, au
 	if errNewReq != nil {
 		return nil, errNewReq
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 
 	token, errTok := strategy.GetToken(ctx, e.cfg, auth)
 	if errTok != nil {
@@ -305,7 +305,7 @@ func (e *GeminiVertexExecutor) countTokensWithStrategy(ctx context.Context, auth
 	if errNewReq != nil {
 		return provider.Response{}, errNewReq
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 
 	token, errTok := strategy.GetToken(ctx, e.cfg, auth)
 	if errTok != nil {

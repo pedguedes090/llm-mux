@@ -104,7 +104,7 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *provider.Auth, req p
 	if err != nil {
 		return resp, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	} else if bearer != "" {
@@ -195,7 +195,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth,
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	} else {
@@ -342,7 +342,7 @@ func (e *GeminiExecutor) CountTokens(ctx context.Context, auth *provider.Auth, r
 	if err != nil {
 		return provider.Response{}, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	} else {

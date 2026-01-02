@@ -157,6 +157,11 @@ Environment variables override config file values. All use `LLM_MUX_` prefix.
 | Variable | Description |
 |----------|-------------|
 | `LLM_MUX_MANAGEMENT_KEY` | Management API authentication key |
+| `LLM_MUX_ALLOW_REMOTE` | Allow remote management access (`true` or `1`) |
+
+> **Note:** Remote management requires both:
+> - A management key (`LLM_MUX_MANAGEMENT_KEY` or `~/.config/llm-mux/credentials.json`)
+> - Remote access enabled (`LLM_MUX_ALLOW_REMOTE=true` or `allow-remote: true` in config)
 
 ### Usage Statistics
 
@@ -342,6 +347,12 @@ remote-management:
 
 ws-auth: false              # WebSocket authentication
 use-canonical-translator: true  # IR translator (recommended)
+```
+
+For remote management via environment variables:
+```bash
+export LLM_MUX_MANAGEMENT_KEY=your-secret-key
+export LLM_MUX_ALLOW_REMOTE=true
 ```
 
 See [API Reference](api-reference.md#management-api) for management endpoints.

@@ -12,12 +12,12 @@ import (
 
 	codexauth "github.com/nghyane/llm-mux/internal/auth/codex"
 	"github.com/nghyane/llm-mux/internal/config"
+	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/misc"
 	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"github.com/tiktoken-go/tokenizer"
@@ -510,7 +510,7 @@ func (e *CodexExecutor) cacheHelper(ctx context.Context, from provider.Format, u
 }
 
 func applyCodexHeaders(r *http.Request, auth *provider.Auth, token string) {
-	r.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(r, "application/json")
 	r.Header.Set("Authorization", "Bearer "+token)
 
 	var ginHeaders http.Header
@@ -524,7 +524,6 @@ func applyCodexHeaders(r *http.Request, auth *provider.Auth, token string) {
 	misc.EnsureHeader(r.Header, ginHeaders, "User-Agent", DefaultCodexUserAgent)
 
 	r.Header.Set("Accept", "text/event-stream")
-	r.Header.Set("Connection", "Keep-Alive")
 
 	isAPIKey := false
 	if auth != nil {

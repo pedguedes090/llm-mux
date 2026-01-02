@@ -104,12 +104,16 @@ See [Providers](providers.md) for available models.
 
 See [management-api.yaml](management-api.yaml) for full OpenAPI specification.
 
-Base path: `/v1/management` | Auth: `X-Management-Key` header
+Base path: `/v1/management` | Auth: `X-Management-Key` header or `Authorization: Bearer <key>`
 
 ```bash
 # Generate management key
 llm-mux --init
 
-# Example request
+# Local access (only needs key)
 curl -H "X-Management-Key: $KEY" http://localhost:8317/v1/management/config
+
+# Remote access (needs both key AND allow-remote)
+# Set LLM_MUX_ALLOW_REMOTE=true or config allow-remote: true
+curl -H "Authorization: Bearer $KEY" http://your-server:8317/v1/management/config
 ```

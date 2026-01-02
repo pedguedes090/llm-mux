@@ -385,7 +385,7 @@ func (e *AntigravityExecutor) buildCountTokensRequest(ctx context.Context, token
 		return nil, err
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("Accept", "application/json")
 	applyGeminiCLIHeaders(httpReq)
@@ -578,7 +578,7 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *provider.A
 	if errReq != nil {
 		return nil, errReq
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("User-Agent", resolveUserAgent(auth))
 	if stream {

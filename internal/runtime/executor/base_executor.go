@@ -40,3 +40,11 @@ func (b *BaseExecutor) RefreshNoOp(_ context.Context, auth *provider.Auth) (*pro
 func (b *BaseExecutor) CountTokensNotSupported(prov string) (provider.Response, error) {
 	return provider.Response{}, NewNotImplementedError("count tokens not supported for " + prov)
 }
+
+func SetCommonHeaders(req *http.Request, contentType string) {
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+}

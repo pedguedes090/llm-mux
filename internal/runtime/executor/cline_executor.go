@@ -11,8 +11,8 @@ import (
 
 	clineauth "github.com/nghyane/llm-mux/internal/auth/cline"
 	"github.com/nghyane/llm-mux/internal/config"
-	"github.com/nghyane/llm-mux/internal/provider"
 	log "github.com/nghyane/llm-mux/internal/logging"
+	"github.com/nghyane/llm-mux/internal/provider"
 )
 
 type ClineExecutor struct {
@@ -182,7 +182,6 @@ func (e *ClineExecutor) applyClineHeaders(req *http.Request, token string, strea
 		Token: token,
 		StreamHeaders: map[string]string{
 			"Cache-Control": "no-cache",
-			"Connection":    "keep-alive",
 		},
 	}, stream)
 }

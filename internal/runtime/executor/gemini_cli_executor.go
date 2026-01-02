@@ -13,12 +13,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nghyane/llm-mux/internal/config"
+	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/misc"
 	"github.com/nghyane/llm-mux/internal/oauth"
 	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/runtime/geminicli"
-	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/tidwall/sjson"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -111,7 +111,7 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *provider.Auth, re
 			err = errReq
 			return resp, err
 		}
-		reqHTTP.Header.Set("Content-Type", "application/json")
+		SetCommonHeaders(reqHTTP, "application/json")
 		reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 		applyGeminiCLIHeaders(reqHTTP)
 		reqHTTP.Header.Set("Accept", "application/json")
@@ -240,7 +240,7 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *provider.Au
 			err = errReq
 			return nil, err
 		}
-		reqHTTP.Header.Set("Content-Type", "application/json")
+		SetCommonHeaders(reqHTTP, "application/json")
 		reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 		applyGeminiCLIHeaders(reqHTTP)
 		reqHTTP.Header.Set("Accept", "text/event-stream")
@@ -358,7 +358,7 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *provider.Auth
 		if errReq != nil {
 			return provider.Response{}, errReq
 		}
-		reqHTTP.Header.Set("Content-Type", "application/json")
+		SetCommonHeaders(reqHTTP, "application/json")
 		reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 		applyGeminiCLIHeaders(reqHTTP)
 		reqHTTP.Header.Set("Accept", "application/json")

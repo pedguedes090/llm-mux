@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/nghyane/llm-mux/internal/config"
-	"github.com/nghyane/llm-mux/internal/provider"
 	log "github.com/nghyane/llm-mux/internal/logging"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"golang.org/x/net/proxy"
 )
 
 func newProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *provider.Auth, timeout time.Duration) *http.Client {
-	httpClient := &http.Client{}
+	httpClient := AcquireHTTPClient()
 	if timeout > 0 {
 		httpClient.Timeout = timeout
 	}
@@ -29,7 +29,8 @@ func newProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *prov
 	}
 
 	if proxyURL != "" {
-		transport := buildProxyTransport(proxyURL)
+		// Use cached transport for proxy URLs to enable connection pooling
+		transport := getCachedTransport(proxyURL)
 		if transport != nil {
 			httpClient.Transport = transport
 			return httpClient

@@ -135,7 +135,7 @@ func (e *KiroExecutor) buildHTTPRequest(rc *requestContext) (*http.Request, erro
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(httpReq, "application/json")
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("x-amzn-kiro-agent-mode", "vibe")
 	httpReq.Header.Set("x-amz-user-agent", "aws-sdk-js/1.0.7 KiroIDE-0.1.25 llm-mux")
@@ -235,7 +235,6 @@ func (e *KiroExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, r
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Connection", "keep-alive")
 
 	client := &http.Client{}
 	if proxy := e.cfg.ProxyURL; proxy != "" {

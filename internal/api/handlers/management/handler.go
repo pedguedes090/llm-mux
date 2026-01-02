@@ -28,36 +28,29 @@ type attemptInfo struct {
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
-	cfg                 *config.Config
-	cfgMu               sync.RWMutex // protects cfg for concurrent read/write during hot-reload
-	configFilePath      string
-	mu                  sync.Mutex
-	attemptsMu          sync.Mutex
-	failedAttempts      map[string]*attemptInfo // keyed by client IP
-	authManager         *provider.Manager
-	usagePlugin         *usage.LoggerPlugin
-	tokenStore          provider.Store
-	localPassword       string
-	allowRemoteOverride bool
-	logDir              string
-	httpClient          *http.Client
-	httpClientOnce      sync.Once
+	cfg            *config.Config
+	cfgMu          sync.RWMutex // protects cfg for concurrent read/write during hot-reload
+	configFilePath string
+	mu             sync.Mutex
+	attemptsMu     sync.Mutex
+	failedAttempts map[string]*attemptInfo // keyed by client IP
+	authManager    *provider.Manager
+	usagePlugin    *usage.LoggerPlugin
+	tokenStore     provider.Store
+	localPassword  string
+	logDir         string
+	httpClient     *http.Client
+	httpClientOnce sync.Once
 }
 
-// NewHandler creates a new management handler instance.
 func NewHandler(cfg *config.Config, configFilePath string, manager *provider.Manager) *Handler {
-	// Check if MANAGEMENT_PASSWORD env is set to enable remote override
-	envSecret, _ := os.LookupEnv("MANAGEMENT_PASSWORD")
-	envSecret = strings.TrimSpace(envSecret)
-
 	return &Handler{
-		cfg:                 cfg,
-		configFilePath:      configFilePath,
-		failedAttempts:      make(map[string]*attemptInfo),
-		authManager:         manager,
-		usagePlugin:         usage.GetLoggerPlugin(),
-		tokenStore:          login.GetTokenStore(),
-		allowRemoteOverride: envSecret != "",
+		cfg:            cfg,
+		configFilePath: configFilePath,
+		failedAttempts: make(map[string]*attemptInfo),
+		authManager:    manager,
+		usagePlugin:    usage.GetLoggerPlugin(),
+		tokenStore:     login.GetTokenStore(),
 	}
 }
 
@@ -124,7 +117,7 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 		if cfg != nil {
 			allowRemote = cfg.RemoteManagement.AllowRemote
 		}
-		if h.allowRemoteOverride {
+		if v, hasEnv := os.LookupEnv("LLM_MUX_ALLOW_REMOTE"); hasEnv && (v == "true" || v == "1") {
 			allowRemote = true
 		}
 

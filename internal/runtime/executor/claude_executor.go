@@ -12,13 +12,12 @@ import (
 
 	"github.com/nghyane/llm-mux/internal/auth/claude"
 	"github.com/nghyane/llm-mux/internal/config"
+	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/misc"
 	"github.com/nghyane/llm-mux/internal/provider"
-	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
@@ -387,57 +386,12 @@ func extractAndRemoveBetas(body []byte) ([]string, []byte) {
 }
 
 func (e *ClaudeExecutor) injectThinkingConfig(modelName string, body []byte) []byte {
-	if gjson.GetBytes(body, "thinking").Exists() {
-		return body
-	}
-
-	var budgetTokens int
-	switch {
-	case strings.HasSuffix(modelName, "-thinking-low"):
-		budgetTokens = 1024
-	case strings.HasSuffix(modelName, "-thinking-medium"):
-		budgetTokens = 8192
-	case strings.HasSuffix(modelName, "-thinking-high"):
-		budgetTokens = 24576
-	case strings.HasSuffix(modelName, "-thinking"):
-		budgetTokens = 8192
-	default:
-		return body
-	}
-
-	body, _ = sjson.SetBytes(body, "thinking.type", "enabled")
-	body, _ = sjson.SetBytes(body, "thinking.budget_tokens", budgetTokens)
-	return body
+	cfg := ParseClaudeThinkingFromModel(modelName)
+	return cfg.ApplyToClaude(body)
 }
 
 func ensureMaxTokensForThinking(modelName string, body []byte) []byte {
-	thinkingType := gjson.GetBytes(body, "thinking.type").String()
-	if thinkingType != "enabled" {
-		return body
-	}
-
-	budgetTokens := gjson.GetBytes(body, "thinking.budget_tokens").Int()
-	if budgetTokens <= 0 {
-		return body
-	}
-
-	maxTokens := gjson.GetBytes(body, "max_tokens").Int()
-
-	maxCompletionTokens := 0
-	if modelInfo := registry.GetGlobalRegistry().GetModelInfo(modelName); modelInfo != nil {
-		maxCompletionTokens = modelInfo.MaxCompletionTokens
-	}
-
-	const fallbackBuffer = 4000
-	requiredMaxTokens := budgetTokens + fallbackBuffer
-	if maxCompletionTokens > 0 {
-		requiredMaxTokens = int64(maxCompletionTokens)
-	}
-
-	if maxTokens < requiredMaxTokens {
-		body, _ = sjson.SetBytes(body, "max_tokens", requiredMaxTokens)
-	}
-	return body
+	return EnsureClaudeMaxTokens(modelName, body)
 }
 
 func (e *ClaudeExecutor) resolveUpstreamModel(alias string, auth *provider.Auth) string {
@@ -524,7 +478,7 @@ func (e *ClaudeExecutor) resolveClaudeConfig(auth *provider.Auth) *config.Provid
 
 func applyClaudeHeaders(r *http.Request, auth *provider.Auth, apiKey string, stream bool, extraBetas []string) {
 	r.Header.Set("Authorization", "Bearer "+apiKey)
-	r.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(r, "application/json")
 
 	var ginHeaders http.Header
 	if ginCtx, ok := r.Context().Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
@@ -567,8 +521,6 @@ func applyClaudeHeaders(r *http.Request, auth *provider.Auth, apiKey string, str
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Os", "MacOS")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Timeout", "60")
 	misc.EnsureHeader(r.Header, ginHeaders, "User-Agent", DefaultClaudeUserAgent)
-	r.Header.Set("Connection", "keep-alive")
-	r.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 	if stream {
 		r.Header.Set("Accept", "text/event-stream")
 	} else {

@@ -21,7 +21,7 @@ type HeaderConfig struct {
 }
 
 func ApplyAPIHeaders(r *http.Request, cfg HeaderConfig, stream bool) {
-	r.Header.Set("Content-Type", "application/json")
+	SetCommonHeaders(r, "application/json")
 	r.Header.Set("Authorization", "Bearer "+cfg.Token)
 
 	if stream {

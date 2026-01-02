@@ -112,6 +112,11 @@ For cloud deployments, see [Configuration - Environment Variables](configuration
 
 ```yaml
 environment:
+  # Remote management (both required)
+  - LLM_MUX_MANAGEMENT_KEY=your-secret-key
+  - LLM_MUX_ALLOW_REMOTE=true
+  
+  # Storage backend
   - PGSTORE_DSN=postgresql://user:pass@postgres:5432/db
   # or
   - OBJECTSTORE_ENDPOINT=https://s3.amazonaws.com
