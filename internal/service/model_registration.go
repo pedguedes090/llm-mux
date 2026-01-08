@@ -105,6 +105,9 @@ func registerModelsForAuth(a *provider.Auth, cfg *config.Config, wsGateway *wsre
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		models = providers.FetchAntigravityModels(ctx, a, cfg)
 		cancel()
+		if len(models) == 0 {
+			models = registry.GetGeminiModelsForProvider("gemini-cli")
+		}
 		models = applyExcludedModels(models, excluded)
 	case "claude":
 		models = registry.GetClaudeModels()

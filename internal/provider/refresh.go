@@ -77,7 +77,12 @@ func (m *Manager) StopAutoRefresh() {
 // Uses a semaphore to bound the number of concurrent refresh goroutines.
 func (m *Manager) checkRefreshes(ctx context.Context) {
 	now := time.Now()
-	snapshot := m.snapshotAuths()
+	var snapshot []*Auth
+	if m.registry != nil {
+		snapshot = m.registry.List()
+	} else {
+		snapshot = m.snapshotAuths()
+	}
 	for _, a := range snapshot {
 		typ, _ := a.AccountInfo()
 		if typ != "api_key" {

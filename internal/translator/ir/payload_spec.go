@@ -204,7 +204,7 @@ var VertexGeminiRequestSpec = &PayloadSpec{
 		"cachedContent":     stringField(false),
 		"labels":            anyField(false),
 		// Session management (added by geminiToAntigravity)
-		"sessionId": stringField(false),
+		"session_id": stringField(false),
 	},
 }
 
@@ -267,7 +267,7 @@ var VertexClaudeRequestSpec = &PayloadSpec{
 		"tools":             claudeToolsSpec,
 		// toolConfig with mode:"VALIDATED" is NOT supported by Claude on Antigravity
 		// Session management
-		"sessionId": stringField(false),
+		"session_id": stringField(false),
 		// These are explicitly NOT allowed for Claude:
 		// - safetySettings (Gemini-specific)
 		// - cachedContent (Gemini caching format)
@@ -285,11 +285,12 @@ var VertexClaudeRequestSpec = &PayloadSpec{
 var AntigravityWrapperSpec = &PayloadSpec{
 	Name: "AntigravityWrapper",
 	Fields: map[string]*FieldSpec{
-		"model":     stringField(true),
-		"userAgent": stringField(false),
-		"project":   stringField(false),
-		"requestId": stringField(false),
-		"request":   objectField(true, nil), // Inner request validated separately
+		"model":       stringField(true),
+		"userAgent":   stringField(false),
+		"project":     stringField(false),
+		"requestId":   stringField(false),
+		"requestType": stringField(false),
+		"request":     objectField(true, nil),
 	},
 }
 

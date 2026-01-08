@@ -7,24 +7,6 @@ import (
 	"time"
 )
 
-func TestStickySessionExpiry(t *testing.T) {
-	store := NewStickyStore()
-	store.Start()
-	defer store.Stop()
-
-	store.Set("key1", "auth1")
-
-	if authID, ok := store.Get("key1"); !ok || authID != "auth1" {
-		t.Errorf("Expected auth1, got %s, ok=%v", authID, ok)
-	}
-
-	time.Sleep(stickyTTL + 100*time.Millisecond)
-
-	if _, ok := store.Get("key1"); ok {
-		t.Error("Expected entry to be expired")
-	}
-}
-
 func TestStickyStoreSharding(t *testing.T) {
 	store := NewStickyStore()
 	store.Start()

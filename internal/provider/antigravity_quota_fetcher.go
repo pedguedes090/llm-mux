@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -12,6 +13,20 @@ const (
 	antigravityQuotaEndpoint = "https://cloudcode-pa.googleapis.com/v1internal:getQuotaInfo"
 	quotaFetchTimeout        = 10 * time.Second
 )
+
+var quotaHTTPClient = &http.Client{
+	Timeout: quotaFetchTimeout,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:        10,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 5 * time.Second,
+	},
+}
 
 func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSnapshot {
 	if accessToken == "" {
@@ -29,7 +44,7 @@ func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSn
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := quotaHTTPClient.Do(req)
 	if err != nil {
 		return nil
 	}

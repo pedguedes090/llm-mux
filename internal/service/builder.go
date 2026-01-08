@@ -171,13 +171,15 @@ func (b *Builder) Build() (*Service, error) {
 	}
 	accessManager.SetProviders(providers)
 
+	serviceHook := NewServiceHook()
+
 	coreManager := b.coreManager
 	if coreManager == nil {
 		tokenStore := login.GetTokenStore()
 		if dirSetter, ok := tokenStore.(interface{ SetBaseDir(string) }); ok && b.cfg != nil {
 			dirSetter.SetBaseDir(b.cfg.AuthDir)
 		}
-		coreManager = provider.NewManager(tokenStore, nil, nil)
+		coreManager = provider.NewManager(tokenStore, nil, serviceHook)
 	}
 	// Attach a default RoundTripper provider so providers can opt-in per-auth transports.
 	coreManager.SetRoundTripperProvider(newDefaultRoundTripperProvider())
@@ -200,5 +202,8 @@ func (b *Builder) Build() (*Service, error) {
 		coreManager:    coreManager,
 		serverOptions:  append([]api.ServerOption(nil), b.serverOptions...),
 	}
+
+	serviceHook.SetService(service)
+
 	return service, nil
 }

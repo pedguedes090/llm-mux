@@ -34,7 +34,7 @@ func (m *Manager) executeWithProvider(ctx context.Context, provider string, req 
 	tried := make(map[string]struct{})
 	var lastErr error
 	for {
-		auth, executor, errPick := m.pickNext(ctx, provider, req.Model, opts, tried)
+		auth, executor, errPick := m.pickNextFromRegistry(ctx, provider, req.Model, opts, tried)
 		if errPick != nil {
 			telemetry.RecordError(span, errPick)
 			if lastErr != nil {
@@ -104,7 +104,7 @@ func (m *Manager) executeCountWithProvider(ctx context.Context, provider string,
 	tried := make(map[string]struct{})
 	var lastErr error
 	for {
-		auth, executor, errPick := m.pickNext(ctx, provider, req.Model, opts, tried)
+		auth, executor, errPick := m.pickNextFromRegistry(ctx, provider, req.Model, opts, tried)
 		if errPick != nil {
 			if lastErr != nil {
 				return Response{}, lastErr
@@ -174,7 +174,7 @@ func (m *Manager) executeStreamWithProvider(ctx context.Context, provider string
 	tried := make(map[string]struct{})
 	var lastErr error
 	for {
-		auth, executor, errPick := m.pickNext(ctx, provider, req.Model, opts, tried)
+		auth, executor, errPick := m.pickNextFromRegistry(ctx, provider, req.Model, opts, tried)
 		if errPick != nil {
 			done(false)
 			if lastErr != nil {

@@ -28,15 +28,10 @@ func init() {
 
 // ProviderExecutor defines the contract required by Manager to execute provider calls.
 type ProviderExecutor interface {
-	// Identifier returns the provider key handled by this executor.
 	Identifier() string
-	// Execute handles non-streaming execution and returns the provider response payload.
 	Execute(ctx context.Context, auth *Auth, req Request, opts Options) (Response, error)
-	// ExecuteStream handles streaming execution and returns a channel of provider chunks.
 	ExecuteStream(ctx context.Context, auth *Auth, req Request, opts Options) (<-chan StreamChunk, error)
-	// Refresh attempts to refresh provider credentials and returns the updated auth state.
 	Refresh(ctx context.Context, auth *Auth) (*Auth, error)
-	// CountTokens returns the token count for the given request.
 	CountTokens(ctx context.Context, auth *Auth, req Request, opts Options) (Response, error)
 }
 
@@ -105,7 +100,7 @@ type Manager struct {
 	rtProvider RoundTripperProvider
 
 	refreshCancel context.CancelFunc
-	refreshSem    *semaphore.Weighted // limits concurrent refresh goroutines
+	refreshSem    *semaphore.Weighted
 
 	breakerMu         sync.RWMutex
 	breakers          map[string]*resilience.CircuitBreaker
@@ -113,8 +108,7 @@ type Manager struct {
 
 	retryBudget *resilience.RetryBudget
 
-	// Async result processing for reduced lock contention
-	resultWorker *asyncResultWorker
+	registry *AuthRegistry
 }
 
 // NewManager constructs a manager with optional custom selector and hook.
@@ -135,14 +129,12 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		providerStats:     NewProviderStats(),
 		breakers:          make(map[string]*resilience.CircuitBreaker),
 		streamingBreakers: make(map[string]*resilience.StreamingCircuitBreaker),
-		retryBudget:       resilience.NewRetryBudget(100), // Allow up to 100 concurrent retries
-		refreshSem:        newRefreshSemaphore(),          // Bound concurrent refresh goroutines
+		retryBudget:       resilience.NewRetryBudget(100),
+		refreshSem:        newRefreshSemaphore(),
 	}
-	// Initialize async result worker for reduced lock contention
-	m.resultWorker = newAsyncResultWorker(m, resultWorkerConfig{
-		QueueSize: 2048,
-		Workers:   4,
-	})
+	m.registry = NewAuthRegistry(store, hook)
+	m.registry.SetExecutorProvider(m.executorFor)
+	m.registry.Start()
 	if lc, ok := selector.(SelectorLifecycle); ok {
 		lc.Start()
 	}
@@ -154,9 +146,8 @@ func (m *Manager) Stop() {
 	if m.refreshCancel != nil {
 		m.refreshCancel()
 	}
-	// Stop async result worker
-	if m.resultWorker != nil {
-		m.resultWorker.Stop()
+	if m.registry != nil {
+		m.registry.Stop()
 	}
 	m.mu.RLock()
 	selector := m.selector
@@ -228,8 +219,12 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.mu.Lock()
 	m.auths[auth.ID] = auth.Clone()
 	m.mu.Unlock()
+	if m.registry != nil {
+		_, _ = m.registry.Register(ctx, auth)
+	}
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthRegistered(ctx, auth.Clone())
+
 	return auth.Clone(), nil
 }
 
@@ -246,8 +241,12 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	auth.EnsureIndex()
 	m.auths[auth.ID] = auth.Clone()
 	m.mu.Unlock()
+	if m.registry != nil {
+		_, _ = m.registry.Update(ctx, auth)
+	}
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
+
 	return auth.Clone(), nil
 }
 
@@ -269,6 +268,9 @@ func (m *Manager) Load(ctx context.Context) error {
 		}
 		auth.EnsureIndex()
 		m.auths[auth.ID] = auth.Clone()
+	}
+	if m.registry != nil {
+		_ = m.registry.Load(ctx)
 	}
 	return nil
 }
@@ -461,12 +463,17 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	if result.AuthID == "" {
 		return
 	}
-	// Delegate to async worker for non-blocking processing
-	if m.resultWorker != nil {
-		m.resultWorker.Submit(ctx, result)
+	// Delegate to AuthRegistry for lock-free path
+	if m.registry != nil {
+		m.registry.MarkResult(ctx, result)
+		if result.Error != nil && result.Error.HTTPStatus == 429 {
+			if qm, ok := m.selector.(*QuotaManager); ok {
+				qm.RecordQuotaHit(result.AuthID, result.Provider, result.Model, result.RetryAfter)
+			}
+		}
 		return
 	}
-	// Fallback to sync processing if worker not initialized
+	// Fallback to sync processing when registry is not available (legacy mode)
 	m.markResultSync(ctx, result)
 }
 
@@ -735,6 +742,53 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts Opt
 	return authCopy, executor, nil
 }
 
+func (m *Manager) pickNextFromRegistry(ctx context.Context, provider, model string, opts Options, tried map[string]struct{}) (*Auth, ProviderExecutor, error) {
+	if m.registry == nil {
+		return m.pickNext(ctx, provider, model, opts, tried)
+	}
+
+	m.mu.RLock()
+	executor, okExecutor := m.executors[provider]
+	m.mu.RUnlock()
+	if !okExecutor {
+		return nil, nil, &Error{Code: "executor_not_found", Message: "executor not registered"}
+	}
+
+	modelKey := model
+	if len(model) > 0 && (model[0] == ' ' || model[len(model)-1] == ' ') {
+		modelKey = strings.TrimSpace(model)
+	}
+
+	var entries []*AuthEntry
+	registryRef := registry.GetGlobalRegistry()
+	for _, entry := range m.registry.ListByProvider(provider) {
+		if entry.IsDisabled() {
+			continue
+		}
+		if _, used := tried[entry.ID()]; used {
+			continue
+		}
+		if modelKey != "" && registryRef != nil && !registryRef.ClientSupportsModel(entry.ID(), modelKey) {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	if len(entries) == 0 {
+		return nil, nil, &Error{Code: "auth_not_found", Message: "no auth available"}
+	}
+
+	selected, errPick := m.registry.Pick(ctx, provider, model, opts, entries)
+	if errPick != nil {
+		return nil, nil, errPick
+	}
+	if selected == nil {
+		return nil, nil, &Error{Code: "auth_not_found", Message: "selector returned no auth"}
+	}
+
+	return selected.ToAuth(), executor, nil
+}
+
 func (m *Manager) persist(ctx context.Context, auth *Auth) error {
 	if m.store == nil || auth == nil {
 		return nil
@@ -786,8 +840,21 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 	if err != nil {
 		m.mu.Lock()
 		if current := m.auths[id]; current != nil && current.UpdatedAt == authUpdatedAt {
+			errMsg := err.Error()
+			if isOAuthRevokedError(errMsg) {
+				log.Warnf("disabling auth %s due to OAuth revocation: %s", id, errMsg)
+				current.Disabled = true
+				current.Status = StatusDisabled
+				current.StatusMessage = "oauth_token_revoked: " + errMsg
+				current.LastError = &Error{Message: errMsg}
+				current.UpdatedAt = now
+				m.auths[id] = current
+				m.mu.Unlock()
+				_, _ = m.Update(ctx, current)
+				return
+			}
 			current.NextRefreshAfter = now.Add(refreshFailureBackoff)
-			current.LastError = &Error{Message: err.Error()}
+			current.LastError = &Error{Message: errMsg}
 			m.auths[id] = current
 		}
 		m.mu.Unlock()
@@ -956,4 +1023,15 @@ func (m *Manager) GetQuotaManager() *QuotaManager {
 		return qm
 	}
 	return nil
+}
+
+func (m *Manager) AuthRegistry() *AuthRegistry {
+	return m.registry
+}
+
+func (m *Manager) GetAuthEntry(id string) *AuthEntry {
+	if m.registry == nil {
+		return nil
+	}
+	return m.registry.GetEntry(id)
 }

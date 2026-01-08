@@ -1,5 +1,9 @@
 package provider
 
+import "errors"
+
+var ErrTokenNotReady = errors.New("token not ready")
+
 // Error describes an authentication related failure in a provider agnostic format.
 type Error struct {
 	Code        string        `json:"code,omitempty"`

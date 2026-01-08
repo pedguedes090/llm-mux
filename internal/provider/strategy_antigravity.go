@@ -29,9 +29,10 @@ func (s *AntigravityStrategy) Score(auth *Auth, state *AuthQuotaState, config *P
 		}
 	}
 
-	if !state.IsTokenValid(30 * time.Second) {
+	tokenValid, needsRefresh := checkTokenFromAuth(auth, 30*time.Second)
+	if !tokenValid {
 		priority += 10000
-	} else if state.NeedsTokenRefresh() {
+	} else if needsRefresh {
 		priority += 500
 	}
 
@@ -74,8 +75,7 @@ func (s *AntigravityStrategy) RecordUsage(state *AuthQuotaState, tokens int64) {
 func (s *AntigravityStrategy) StartRefresh(ctx context.Context, auth *Auth) <-chan *RealQuotaSnapshot {
 	ch := make(chan *RealQuotaSnapshot, 1)
 
-	accessToken := extractAccessToken(auth)
-	if accessToken == "" {
+	if auth == nil {
 		close(ch)
 		return ch
 	}
@@ -89,24 +89,27 @@ func (s *AntigravityStrategy) StartRefresh(ctx context.Context, auth *Auth) <-ch
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
 
-		if snapshot := fetchAntigravityQuota(ctx, accessToken); snapshot != nil {
-			select {
-			case ch <- snapshot:
-			default:
+		fetchQuota := func() {
+			token := extractAccessToken(auth)
+			if token == "" {
+				return
+			}
+			if snapshot := fetchAntigravityQuota(ctx, token); snapshot != nil {
+				select {
+				case ch <- snapshot:
+				default:
+				}
 			}
 		}
+
+		fetchQuota()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if snapshot := fetchAntigravityQuota(ctx, accessToken); snapshot != nil {
-					select {
-					case ch <- snapshot:
-					default:
-					}
-				}
+				fetchQuota()
 			}
 		}
 	}()
@@ -121,6 +124,41 @@ func extractAccessToken(auth *Auth) string {
 		return v
 	}
 	return ""
+}
+
+func checkTokenFromAuth(auth *Auth, buffer time.Duration) (valid bool, needsRefresh bool) {
+	if auth == nil || auth.Metadata == nil {
+		return false, false
+	}
+
+	token := extractAccessToken(auth)
+	if token == "" {
+		return false, false
+	}
+
+	var expiresAt time.Time
+	if expiredStr, ok := auth.Metadata["expired"].(string); ok && expiredStr != "" {
+		if t, err := time.Parse(time.RFC3339, expiredStr); err == nil {
+			expiresAt = t
+		}
+	}
+
+	if expiresAt.IsZero() {
+		if ts, ok := auth.Metadata["timestamp"].(int64); ok {
+			if expiresIn, ok := auth.Metadata["expires_in"].(int64); ok && expiresIn > 0 {
+				expiresAt = time.UnixMilli(ts).Add(time.Duration(expiresIn) * time.Second)
+			}
+		}
+	}
+
+	if expiresAt.IsZero() {
+		return true, false
+	}
+
+	now := time.Now()
+	valid = now.Add(buffer).Before(expiresAt)
+	needsRefresh = expiresAt.Sub(now) < 5*time.Minute
+	return valid, needsRefresh
 }
 
 var (

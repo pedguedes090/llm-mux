@@ -26,6 +26,7 @@ import (
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 
 	log "github.com/nghyane/llm-mux/internal/logging"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -47,49 +48,22 @@ func alias2ModelName(modelID string) string {
 
 type AntigravityExecutor struct {
 	executor.BaseExecutor
-	tokenManager *executor.TokenManager
 }
 
 func NewAntigravityExecutor(cfg *config.Config) *AntigravityExecutor {
-	e := &AntigravityExecutor{
+	return &AntigravityExecutor{
 		BaseExecutor: executor.BaseExecutor{Cfg: cfg},
 	}
-	e.tokenManager = executor.NewTokenManager(
-		executor.DefaultTokenManagerConfig(),
-		e.doRefreshToken,
-	)
-	return e
-}
-
-func (e *AntigravityExecutor) doRefreshToken(ctx context.Context, auth *provider.Auth) (string, time.Duration, error) {
-	updated, err := e.refreshToken(ctx, auth)
-	if err != nil {
-		return "", 0, err
-	}
-
-	token := executor.MetaStringValue(updated.Metadata, "access_token")
-	expiry := executor.TokenExpiry(updated.Metadata)
-	if token == "" || expiry.IsZero() {
-		return "", 0, executor.NewStatusError(http.StatusUnauthorized, "invalid token response", nil)
-	}
-
-	return token, time.Until(expiry), nil
 }
 
 func (e *AntigravityExecutor) Identifier() string { return antigravityAuthType }
 
 func (e *AntigravityExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error { return nil }
 
-func (e *AntigravityExecutor) PreWarmToken(auth *provider.Auth) {
-	if e.tokenManager != nil {
-		e.tokenManager.PreWarm(auth)
-	}
-}
-
 func (e *AntigravityExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (resp provider.Response, err error) {
 	token, errToken := e.ensureAccessToken(ctx, auth)
 	if errToken != nil {
-		if errors.Is(errToken, executor.ErrTokenNotReady) {
+		if errors.Is(errToken, provider.ErrTokenNotReady) {
 			return resp, &provider.Error{
 				Code:       "token_not_ready",
 				Message:    "token refresh in progress",
@@ -118,9 +92,13 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *provider.Auth, 
 	var lastStatus int
 	var lastBody []byte
 	var lastErr error
+	var lastIdx = -1
 
 	for idx := 0; idx < len(baseURLs); idx++ {
-		handler.Reset()
+		if idx != lastIdx {
+			handler.Reset()
+			lastIdx = idx
+		}
 		baseURL := baseURLs[idx]
 		hasNext := idx+1 < len(baseURLs)
 
@@ -226,7 +204,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *provider.
 
 	token, errToken := e.ensureAccessToken(ctx, auth)
 	if errToken != nil {
-		if errors.Is(errToken, executor.ErrTokenNotReady) {
+		if errors.Is(errToken, provider.ErrTokenNotReady) {
 			return nil, &provider.Error{
 				Code:       "token_not_ready",
 				Message:    "token refresh in progress",
@@ -256,9 +234,13 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *provider.
 	var lastStatus int
 	var lastBody []byte
 	var lastErr error
+	var lastIdx = -1
 
 	for idx := 0; idx < len(baseURLs); idx++ {
-		handler.Reset()
+		if idx != lastIdx {
+			handler.Reset()
+			lastIdx = idx
+		}
 		baseURL := baseURLs[idx]
 		hasNext := idx+1 < len(baseURLs)
 
@@ -381,6 +363,14 @@ func (e *AntigravityExecutor) Refresh(ctx context.Context, auth *provider.Auth) 
 func (e *AntigravityExecutor) CountTokens(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	token, errToken := e.ensureAccessToken(ctx, auth)
 	if errToken != nil {
+		if errors.Is(errToken, provider.ErrTokenNotReady) {
+			return provider.Response{}, &provider.Error{
+				Code:       "token_not_ready",
+				Message:    "token refresh in progress",
+				HTTPStatus: 503,
+				Retryable:  true,
+			}
+		}
 		return provider.Response{}, errToken
 	}
 
@@ -486,7 +476,19 @@ func FetchAntigravityModels(ctx context.Context, auth *provider.Auth, cfg *confi
 }
 
 func (e *AntigravityExecutor) ensureAccessToken(ctx context.Context, auth *provider.Auth) (string, error) {
-	return e.tokenManager.GetToken(ctx, auth)
+	if auth == nil {
+		return "", executor.NewStatusError(http.StatusUnauthorized, "missing auth", nil)
+	}
+
+	token := executor.MetaStringValue(auth.Metadata, "access_token")
+	expiry := executor.TokenExpiry(auth.Metadata)
+	now := time.Now()
+
+	if token != "" && expiry.After(now.Add(executor.TokenExpiryBuffer)) {
+		return token, nil
+	}
+
+	return "", provider.ErrTokenNotReady
 }
 
 func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
@@ -603,6 +605,7 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *provider.A
 	projectID := executor.MetaStringValue(auth.Metadata, "project_id")
 	payload = geminiToAntigravity(modelName, payload, projectID)
 	payload, _ = sjson.SetBytes(payload, "model", alias2ModelName(modelName))
+	payload = applySystemInstructionWithAntigravityIdentity(payload)
 
 	httpReq, errReq := http.NewRequestWithContext(ctx, http.MethodPost, ub.String(), bytes.NewReader(payload))
 	if errReq != nil {
@@ -627,7 +630,7 @@ func buildBaseURL(auth *provider.Auth) string {
 	if baseURLs := antigravityBaseURLFallbackOrder(auth); len(baseURLs) > 0 {
 		return baseURLs[0]
 	}
-	return executor.AntigravityBaseURLDaily
+	return executor.AntigravityBaseURLProd
 }
 
 func resolveUserAgent(auth *provider.Auth) string {
@@ -647,8 +650,9 @@ func antigravityBaseURLFallbackOrder(auth *provider.Auth) []string {
 		return []string{base}
 	}
 	return []string{
-		executor.AntigravityBaseURLDaily,
 		executor.AntigravityBaseURLProd,
+		executor.AntigravityBaseURLDaily,
+		executor.AntigravityBaseURLSandboxDaily,
 	}
 }
 
@@ -683,6 +687,7 @@ func geminiToAntigravity(modelName string, payload []byte, projectID string) []b
 
 	data["model"] = modelName
 	data["userAgent"] = "antigravity"
+	data["requestType"] = "agent"
 	if projectID != "" {
 		data["project"] = projectID
 	} else {
@@ -847,7 +852,7 @@ func convertParametersJsonSchemaForClaude(req map[string]interface{}) {
 }
 
 func generateRequestID() string {
-	return "req-" + uuid.NewString()
+	return "agent-" + uuid.NewString()
 }
 
 var (
@@ -907,4 +912,61 @@ func deriveStableSessionID(req map[string]interface{}) string {
 	}
 
 	return "session-" + uuid.NewString()
+}
+
+// antigravityIdentity is a minimal identity prompt used as fallback when user doesn't provide one.
+const antigravityIdentity = `You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.
+You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+**Absolute paths only**
+**Proactiveness**`
+
+// applySystemInstructionWithAntigravityIdentity checks if the user already provided Antigravity identity
+// in systemInstruction. If not, it PREPENDS a minimal fallback identity while preserving user's system prompt.
+// This matches upstream Antigravity-Manager v3.3.17 behavior.
+func applySystemInstructionWithAntigravityIdentity(payload []byte) []byte {
+	// Check if systemInstruction already exists and contains Antigravity identity
+	existingInstruction := gjson.GetBytes(payload, "request.systemInstruction.parts.0.text").String()
+	if strings.Contains(existingInstruction, "You are Antigravity") {
+		// User already provided Antigravity identity, keep as-is
+		return payload
+	}
+
+	// Also check across all parts (in case it's in a different part)
+	parts := gjson.GetBytes(payload, "request.systemInstruction.parts")
+	if parts.Exists() && parts.IsArray() {
+		for _, part := range parts.Array() {
+			if strings.Contains(part.Get("text").String(), "You are Antigravity") {
+				return payload
+			}
+		}
+	}
+
+	// No Antigravity identity found - PREPEND identity while preserving existing parts
+	systemInstruction := gjson.GetBytes(payload, "request.systemInstruction")
+
+	if systemInstruction.Exists() && parts.Exists() && parts.IsArray() {
+		// Existing systemInstruction with parts - prepend identity part
+		existingParts := parts.Array()
+		newParts := make([]map[string]string, 0, len(existingParts)+1)
+
+		// Add identity as first part
+		newParts = append(newParts, map[string]string{"text": antigravityIdentity})
+
+		// Preserve all existing parts
+		for _, part := range existingParts {
+			if text := part.Get("text").String(); text != "" {
+				newParts = append(newParts, map[string]string{"text": text})
+			}
+		}
+
+		result, _ := sjson.SetBytes(payload, "request.systemInstruction.parts", newParts)
+		return result
+	}
+
+	// No systemInstruction exists - create new one with identity (no role field, matching upstream)
+	result, _ := sjson.SetBytes(payload, "request.systemInstruction.parts", []map[string]string{
+		{"text": antigravityIdentity},
+	})
+
+	return result
 }
