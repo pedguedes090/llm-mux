@@ -43,7 +43,7 @@ var Config = struct {
 	TLSHandshakeTimeout:   10 * time.Second,  // TLS handshake timeout
 	ExpectContinueTimeout: 1 * time.Second,   // 100-continue timeout
 	ResponseHeaderTimeout: 600 * time.Second, // 10 minutes for large context processing
-	DialTimeout:           10 * time.Second,  // TCP dial timeout
+	DialTimeout:           3 * time.Second,   // TCP dial timeout
 	KeepAlive:             30 * time.Second,  // TCP keep-alive interval
 
 	// HTTP/2 settings for streaming stability

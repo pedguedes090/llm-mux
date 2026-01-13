@@ -658,9 +658,9 @@ func antigravityBaseURLFallbackOrder(auth *provider.Auth) []string {
 		return []string{base}
 	}
 	return []string{
-		executor.AntigravityBaseURLProd,
-		executor.AntigravityBaseURLDaily,
 		executor.AntigravityBaseURLSandboxDaily,
+		executor.AntigravityBaseURLSandboxAutopush,
+		executor.AntigravityBaseURLProd,
 	}
 }
 
