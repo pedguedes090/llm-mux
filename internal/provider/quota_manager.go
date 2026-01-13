@@ -405,9 +405,17 @@ func (m *QuotaManager) RecordRequestEnd(authID, provider string, tokens int64, f
 		}
 	}
 
-	if !failed && tokens > 0 {
-		strategy := m.getStrategy(provider)
-		strategy.RecordUsage(state, tokens)
+	if !failed {
+		// Clear cooldown on successful request - this is the counterpart to
+		// RecordQuotaHit setting cooldown on 429 errors. Without this, an account
+		// could stay in cooldown forever even after successful requests prove
+		// the quota has been restored.
+		state.SetCooldownUntil(time.Time{})
+
+		if tokens > 0 {
+			strategy := m.getStrategy(provider)
+			strategy.RecordUsage(state, tokens)
+		}
 	}
 }
 

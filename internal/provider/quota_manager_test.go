@@ -224,6 +224,38 @@ func TestQuotaManager_Pick_AllExhaustedReturnsError(t *testing.T) {
 	}
 }
 
+func TestQuotaManager_RecordRequestEnd_ClearsCooldownOnSuccess(t *testing.T) {
+	m := NewQuotaManager()
+
+	auth1 := &Auth{ID: "auth1", Provider: "antigravity"}
+
+	cooldown := 1 * time.Hour
+	m.RecordQuotaHit("auth1", "antigravity", "test", &cooldown)
+
+	state := m.GetState("auth1")
+	if state == nil || state.CooldownUntil.IsZero() {
+		t.Fatal("expected CooldownUntil to be set after RecordQuotaHit")
+	}
+
+	m.RecordRequestEnd("auth1", "antigravity", 1000, false)
+
+	state = m.GetState("auth1")
+	if state == nil {
+		t.Fatal("expected state to exist")
+	}
+	if !state.CooldownUntil.IsZero() {
+		t.Error("expected CooldownUntil to be cleared after successful RecordRequestEnd")
+	}
+
+	selected, err := m.Pick(context.Background(), "antigravity", "test", Options{ForceRotate: true}, []*Auth{auth1})
+	if err != nil {
+		t.Fatalf("Pick failed after cooldown cleared: %v", err)
+	}
+	if selected.ID != "auth1" {
+		t.Errorf("expected auth1 after cooldown cleared, got %s", selected.ID)
+	}
+}
+
 func TestQuotaConfig_GetProviderQuotaConfig(t *testing.T) {
 	tests := []struct {
 		provider     string
