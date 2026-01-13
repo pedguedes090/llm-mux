@@ -657,8 +657,7 @@ func resolveUserAgent(auth *provider.Auth) string {
 var antigravityURLIndex atomic.Uint32
 
 var antigravityBaseURLs = []string{
-	executor.AntigravityBaseURLSandboxDaily,
-	executor.AntigravityBaseURLSandboxAutopush,
+	executor.AntigravityBaseURLDaily,
 	executor.AntigravityBaseURLProd,
 }
 
