@@ -323,24 +323,30 @@ const (
 const realQuotaFreshness = 5 * time.Minute
 
 func (m *QuotaManager) checkAvailability(state *AuthQuotaState, auth *Auth, model string, now time.Time) availabilityStatus {
-	if state != nil {
-		if real := state.GetRealQuota(); real != nil && time.Since(real.FetchedAt) < realQuotaFreshness {
-			if real.RemainingFraction > quotaRecoveredThreshold {
-				return availabilityAvailable
-			}
-			if real.RemainingFraction <= quotaExhaustedThreshold {
-				return availabilityBlocked
-			}
-		}
-
-		if now.Before(state.GetCooldownUntil()) {
-			return availabilityBlocked
-		}
-	}
-
+	// Check model-level blocking first (handles per-model cooldowns and quota groups)
 	blocked, _, _ := isAuthBlockedForModel(auth, model, now)
 	if blocked {
 		return availabilityBlocked
+	}
+
+	if state != nil {
+		// Check cooldown BEFORE real quota to ensure 429 cooldowns are respected
+		// even if real quota fetch shows recovered quota (prevents thundering herd)
+		if now.Before(state.GetCooldownUntil()) {
+			return availabilityBlocked
+		}
+
+		// Real quota check: use fresh quota data for availability decisions
+		if real := state.GetRealQuota(); real != nil && time.Since(real.FetchedAt) < realQuotaFreshness {
+			if real.RemainingFraction <= quotaExhaustedThreshold {
+				return availabilityBlocked
+			}
+			if real.RemainingFraction > quotaRecoveredThreshold {
+				return availabilityAvailable
+			}
+			// Between thresholds (2%-5%): fall through to availabilityUnknown
+			// This prevents flapping between available/blocked states
+		}
 	}
 
 	return availabilityUnknown
