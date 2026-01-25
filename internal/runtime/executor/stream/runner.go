@@ -61,6 +61,8 @@ type StreamConfig struct {
 	HandleDoneSignal   bool
 	SkipDoneInData     bool
 	IdleTimeout        time.Duration
+	// Sentinel: enable stream loop detection
+	Sentinel *SentinelConfig
 }
 
 func GeminiPreprocessor() StreamPreprocessor {
@@ -162,6 +164,22 @@ func RunSSEStream(
 		scanner := streamutil.NewLineScanner(ctx, body, readerCfg)
 		defer scanner.Close()
 
+		// Create sentinel if configured
+		var sentinel *StreamSentinel
+		if cfg.Sentinel != nil && cfg.Sentinel.Enabled {
+			sentinel = NewStreamSentinel(
+				WithMaxRepeats(cfg.Sentinel.MaxRepeats),
+				WithMaxBytes(cfg.Sentinel.MaxBytes),
+				WithWarningThreshold(cfg.Sentinel.WarningThreshold),
+				WithOnWarning(func(reason string) {
+					log.Warnf("%s: stream sentinel warning: %s", cfg.ExecutorName, reason)
+				}),
+				WithOnTrigger(func(reason string) {
+					log.Warnf("%s: stream sentinel triggered: %s", cfg.ExecutorName, reason)
+				}),
+			)
+		}
+
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -170,6 +188,18 @@ func RunSSEStream(
 			}
 
 			line := scanner.Bytes()
+
+			// Check Stream Sentinel BEFORE processing
+			if sentinel != nil {
+				warning, err := sentinel.Check(line)
+				if err != nil {
+					log.Warnf("Stream sentinel triggered: %v", err)
+					return nil
+				}
+				if warning != nil {
+					log.Warnf("Stream sentinel warning: %v", warning)
+				}
+			}
 
 			if IsDoneLine(line) {
 				if cfg.SkipDoneInData {
