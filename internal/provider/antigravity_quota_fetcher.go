@@ -2,16 +2,34 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nghyane/llm-mux/internal/json"
+	"github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/transport"
 )
 
 const (
 	antigravityQuotaEndpoint = "https://cloudcode-pa.googleapis.com/v1internal:getQuotaInfo"
 	quotaFetchTimeout        = 10 * time.Second
+	quotaCacheTTL            = 30 * time.Second // Cache quota for 30s
+)
+
+// quotaCacheEntry holds cached quota data with TTL
+type quotaCacheEntry struct {
+	snapshot  *RealQuotaSnapshot
+	fetchedAt time.Time
+}
+
+var (
+	quotaCache      = make(map[string]*quotaCacheEntry)
+	quotaCacheMu    sync.RWMutex
+	quotaFetchCount int64
+	quotaCacheHit   int64
 )
 
 func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSnapshot {
@@ -19,11 +37,30 @@ func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSn
 		return nil
 	}
 
+	// Check cache first
+	cached := getCachedQuota(accessToken)
+	if cached != nil {
+		atomic.AddInt64(&quotaCacheHit, 1)
+		return cached
+	}
+
+	// Fetch fresh quota
+	snapshot := doFetchAntigravityQuota(ctx, accessToken)
+	if snapshot != nil {
+		setCachedQuota(accessToken, snapshot)
+	}
+
+	atomic.AddInt64(&quotaFetchCount, 1)
+	return snapshot
+}
+
+func doFetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSnapshot {
 	ctx, cancel := context.WithTimeout(ctx, quotaFetchTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, antigravityQuotaEndpoint, nil)
 	if err != nil {
+		logging.Debugf("antigravity: failed to create quota request: %v", err)
 		return nil
 	}
 
@@ -32,11 +69,13 @@ func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSn
 
 	resp, err := transport.SharedClient.Do(req)
 	if err != nil {
+		logging.Debugf("antigravity: quota request failed: %v", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		logging.Debugf("antigravity: quota request failed with status %d", resp.StatusCode)
 		return nil
 	}
 
@@ -46,6 +85,7 @@ func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSn
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&quotaResp); err != nil {
+		logging.Debugf("antigravity: failed to decode quota response: %v", err)
 		return nil
 	}
 
@@ -61,4 +101,56 @@ func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSn
 	}
 
 	return snapshot
+}
+
+// getCachedQuota returns cached quota if valid, nil otherwise
+func getCachedQuota(accessToken string) *RealQuotaSnapshot {
+	quotaCacheMu.RLock()
+	defer quotaCacheMu.RUnlock()
+
+	entry, ok := quotaCache[accessToken]
+	if !ok {
+		return nil
+	}
+
+	if time.Since(entry.fetchedAt) > quotaCacheTTL {
+		return nil
+	}
+
+	return entry.snapshot
+}
+
+// setCachedQuota stores quota in cache
+func setCachedQuota(accessToken string, snapshot *RealQuotaSnapshot) {
+	quotaCacheMu.Lock()
+	defer quotaCacheMu.Unlock()
+
+	quotaCache[accessToken] = &quotaCacheEntry{
+		snapshot:  snapshot,
+		fetchedAt: time.Now(),
+	}
+}
+
+// ClearQuotaCache clears all cached quota data
+func ClearQuotaCache() {
+	quotaCacheMu.Lock()
+	defer quotaCacheMu.Unlock()
+	quotaCache = make(map[string]*quotaCacheEntry)
+}
+
+// GetQuotaStats returns cache statistics for debugging
+func GetQuotaStats() (fetches, hits int64, cacheSize int) {
+	quotaCacheMu.RLock()
+	defer quotaCacheMu.RUnlock()
+	return quotaFetchCount, quotaCacheHit, len(quotaCache)
+}
+
+type quotaFetcherStats struct {
+	Fetches   int64 `json:"fetches"`
+	CacheHits int64 `json:"cacheHits"`
+	CacheSize int   `json:"cacheSize"`
+}
+
+func (q *quotaFetcherStats) String() string {
+	return fmt.Sprintf("fetches=%d cache_hits=%d cache_size=%d", q.Fetches, q.CacheHits, q.CacheSize)
 }

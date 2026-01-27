@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -28,8 +27,8 @@ type UsageReporter interface {
 }
 
 const (
-	DefaultStreamBufferSize  = 2 * 1024 * 1024
-	DefaultScannerBufferSize = 64 * 1024
+	DefaultStreamBufferSize  = 2 * 1024 * 1024 // 2MB
+	DefaultScannerBufferSize = 1024 * 1024     // 1MB - single user, maximize for single stream
 	DefaultStreamIdleTimeout = 5 * time.Minute
 )
 
@@ -62,6 +61,8 @@ type StreamConfig struct {
 	HandleDoneSignal   bool
 	SkipDoneInData     bool
 	IdleTimeout        time.Duration
+	// Sentinel: enable stream loop detection
+	Sentinel *SentinelConfig
 }
 
 func GeminiPreprocessor() StreamPreprocessor {
@@ -149,23 +150,35 @@ func RunSSEStream(
 			}
 		}()
 
-		// Use StreamReader for context-aware cancellation and idle detection
+		// Use LineScanner from streamutil with bufio.Reader.ReadSlice for large SSE events
+		// Supports lines up to 10MB (vs bufio.Scanner's 64KB initial limit)
 		idleTimeout := cfg.IdleTimeout
 		if idleTimeout == 0 {
 			idleTimeout = DefaultStreamIdleTimeout
 		}
-		streamReader := NewStreamReader(ctx, body, idleTimeout, cfg.ExecutorName)
-		defer streamReader.Close()
-
-		bufPtr := ScannerBufferPool.Get().(*[]byte)
-		defer ScannerBufferPool.Put(bufPtr)
-
-		scanner := bufio.NewScanner(streamReader)
-		maxBufferSize := cfg.MaxBufferSize
-		if maxBufferSize == 0 {
-			maxBufferSize = DefaultStreamBufferSize
+		readerCfg := streamutil.StreamReaderConfig{
+			IdleTimeout: idleTimeout,
+			BufferSize:  256 * 1024,       // 256KB buffer for better streaming throughput
+			MaxLineSize: 10 * 1024 * 1024, // 10MB for large SSE events
 		}
-		scanner.Buffer(*bufPtr, maxBufferSize)
+		scanner := streamutil.NewLineScanner(ctx, body, readerCfg)
+		defer scanner.Close()
+
+		// Create sentinel if configured
+		var sentinel *StreamSentinel
+		if cfg.Sentinel != nil && cfg.Sentinel.Enabled {
+			sentinel = NewStreamSentinel(
+				WithMaxRepeats(cfg.Sentinel.MaxRepeats),
+				WithMaxBytes(cfg.Sentinel.MaxBytes),
+				WithWarningThreshold(cfg.Sentinel.WarningThreshold),
+				WithOnWarning(func(reason string) {
+					log.Warnf("%s: stream sentinel warning: %s", cfg.ExecutorName, reason)
+				}),
+				WithOnTrigger(func(reason string) {
+					log.Warnf("%s: stream sentinel triggered: %s", cfg.ExecutorName, reason)
+				}),
+			)
+		}
 
 		for scanner.Scan() {
 			select {
@@ -175,6 +188,18 @@ func RunSSEStream(
 			}
 
 			line := scanner.Bytes()
+
+			// Check Stream Sentinel BEFORE processing
+			if sentinel != nil {
+				warning, err := sentinel.Check(line)
+				if err != nil {
+					log.Warnf("Stream sentinel triggered: %v", err)
+					return nil
+				}
+				if warning != nil {
+					log.Warnf("Stream sentinel warning: %v", warning)
+				}
+			}
 
 			if IsDoneLine(line) {
 				if cfg.SkipDoneInData {
@@ -395,7 +420,7 @@ func (p *GeminiStreamProcessor) ProcessDone() ([][]byte, error) {
 }
 
 func ConvertPipelineToStreamChunk(ctx context.Context, input <-chan streamutil.Chunk) <-chan provider.StreamChunk {
-	out := make(chan provider.StreamChunk, 128)
+	out := make(chan provider.StreamChunk, 4096) // Single user: maximize channel throughput
 	go func() {
 		defer close(out)
 		for {

@@ -22,6 +22,14 @@ type RequestInfo struct {
 	Body    []byte
 }
 
+// Constants for streaming log optimization
+const (
+	// MaxChunkSizeForLogging limits chunk size to avoid memory issues with large responses
+	MaxChunkSizeForLogging = 16 * 1024 // 16KB max per chunk for logging
+	// LogSamplingRate logs every Nth chunk to reduce overhead
+	LogSamplingRate = 10 // Sample 1 in 10 chunks for high-throughput streaming
+)
+
 // ResponseWriterWrapper wraps gin.ResponseWriter to capture response data for logging.
 type ResponseWriterWrapper struct {
 	gin.ResponseWriter
@@ -35,6 +43,7 @@ type ResponseWriterWrapper struct {
 	statusCode     int
 	headers        map[string][]string
 	logOnErrorOnly bool
+	chunkCounter   int // For sampling
 }
 
 // NewResponseWriterWrapper creates and initializes a new ResponseWriterWrapper.
@@ -72,9 +81,10 @@ func (w *ResponseWriterWrapper) Write(data []byte) (int, error) {
 	// THEN: Handle logging based on response type
 	if w.isStreaming {
 		// For streaming responses: Send to async logging channel (non-blocking)
+		// Single user install: log all chunks for full debugging
 		if w.chunkChannel != nil {
 			select {
-			case w.chunkChannel <- append([]byte(nil), data...): // Non-blocking send with copy
+			case w.chunkChannel <- data: // Single user: log full data
 			default: // Channel full, skip logging to avoid blocking
 			}
 		}

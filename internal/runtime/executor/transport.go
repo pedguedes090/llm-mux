@@ -48,8 +48,8 @@ func baseTransport() *http.Transport {
 			MinVersion: tls.VersionTLS12,
 		},
 
-		WriteBufferSize: 64 * 1024,
-		ReadBufferSize:  64 * 1024,
+		WriteBufferSize: 256 * 1024, // 256KB - increased from 64KB for better streaming throughput
+		ReadBufferSize:  256 * 1024, // 256KB - increased from 64KB for better streaming throughput
 	}
 	configureHTTP2(t)
 	return t

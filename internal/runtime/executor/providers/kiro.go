@@ -252,7 +252,7 @@ func (e *KiroExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, r
 		return nil, fmt.Errorf("upstream error %d: %s", resp.StatusCode, string(body))
 	}
 
-	out := make(chan provider.StreamChunk, 32)
+	out := make(chan provider.StreamChunk, 4096) // Single user: maximize throughput
 	go e.processStream(ctx, resp, req.Model, out)
 	return out, nil
 }

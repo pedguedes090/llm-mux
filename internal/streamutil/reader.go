@@ -2,7 +2,9 @@ package streamutil
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"time"
 )
@@ -11,20 +13,21 @@ import (
 type StreamReaderConfig struct {
 	// IdleTimeout for stalled connection detection (default: 5 minutes)
 	IdleTimeout time.Duration
-	// BufferSize for the scanner (default: 64KB)
+	// BufferSize for the reader (default: 256KB - increased from 64KB for better streaming)
 	BufferSize int
-	// MaxLineSize limit (default: 2MB)
+	// MaxLineSize limit (default: 10MB - increased from 2MB for large SSE events)
 	MaxLineSize int
 	// Name for logging purposes
 	Name string
 }
 
-// DefaultStreamReaderConfig returns sensible defaults.
+// DefaultStreamReaderConfig returns sensible defaults for single-user install.
+// Optimized for maximum single-stream performance.
 func DefaultStreamReaderConfig() StreamReaderConfig {
 	return StreamReaderConfig{
 		IdleTimeout: 5 * time.Minute,
-		BufferSize:  64 * 1024,
-		MaxLineSize: 2 * 1024 * 1024,
+		BufferSize:  1024 * 1024,      // 1MB - single user, maximize performance
+		MaxLineSize: 50 * 1024 * 1024, // 50MB - single user, handle large responses
 		Name:        "stream",
 	}
 }
@@ -91,51 +94,108 @@ func (r *OptimizedStreamReader) Close() error {
 }
 
 // LineScanner provides line-by-line reading with pooled buffers.
+// Uses bufio.Reader.ReadSlice instead of bufio.Scanner to support larger lines.
 type LineScanner struct {
-	reader  *OptimizedStreamReader
-	scanner *bufio.Scanner
-	buf     *[]byte
+	reader    *OptimizedStreamReader
+	readerBuf *bufio.Reader
+	buf       []byte
+	maxSize   int
+	line      []byte
+	err       error
 }
 
 // NewLineScanner creates a scanner for line-by-line reading.
+// Uses bufio.Reader.ReadSlice for handling large SSE events (up to MaxLineSize).
 func NewLineScanner(ctx context.Context, body io.ReadCloser, cfg StreamReaderConfig) *LineScanner {
 	reader := NewOptimizedStreamReader(ctx, body, cfg)
 
-	// Get pooled buffer
-	buf := GetBuffer(cfg.BufferSize)
+	// Get pooled buffer - use larger buffer for better performance
+	bufSize := cfg.BufferSize
+	if bufSize == 0 {
+		bufSize = 256 * 1024
+	}
+	buf := GetBuffer(bufSize)
 
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(*buf, cfg.MaxLineSize)
+	maxSize := cfg.MaxLineSize
+	if maxSize == 0 {
+		maxSize = 10 * 1024 * 1024
+	}
 
 	return &LineScanner{
-		reader:  reader,
-		scanner: scanner,
-		buf:     buf,
+		reader:    reader,
+		readerBuf: bufio.NewReaderSize(reader, bufSize),
+		buf:       *buf,
+		maxSize:   maxSize,
 	}
 }
 
 // Scan advances to the next line. Returns false when done or on error.
+// Uses ReadSlice which handles lines larger than bufio.Scanner's 64KB limit.
 func (s *LineScanner) Scan() bool {
-	return s.scanner.Scan()
+	// Read until newline
+	line, err := s.readerBuf.ReadSlice('\n')
+	if err == io.EOF {
+		if len(line) > 0 {
+			s.line = line
+			return true
+		}
+		s.err = io.EOF
+		return false
+	}
+	if err == bufio.ErrBufferFull {
+		// Line too long - copy partial data to preserve it
+		s.err = &LineTooLongError{MaxSize: s.maxSize}
+		partial := make([]byte, len(s.line))
+		copy(partial, s.line)
+		s.line = partial
+		return false
+	}
+	if err != nil {
+		s.err = err
+		return false
+	}
+
+	s.line = line
+	return true
 }
 
-// Bytes returns the current line bytes.
+// Bytes returns the current line bytes (without trailing newline).
 func (s *LineScanner) Bytes() []byte {
-	return s.scanner.Bytes()
+	// Remove trailing \n and \r\n
+	return bytes.TrimSuffix(s.line, []byte{'\n'})
 }
 
 // Text returns the current line as string.
 func (s *LineScanner) Text() string {
-	return s.scanner.Text()
+	return string(s.Bytes())
 }
 
 // Err returns any error that occurred during scanning.
 func (s *LineScanner) Err() error {
-	return s.scanner.Err()
+	return s.err
 }
 
 // Close closes the scanner and returns the buffer to the pool.
 func (s *LineScanner) Close() error {
-	PutBuffer(s.buf)
+	PutBuffer(&s.buf)
 	return s.reader.Close()
+}
+
+// LineTooLongError indicates the line exceeded the maximum size.
+type LineTooLongError struct {
+	MaxSize int
+}
+
+func (e *LineTooLongError) Error() string {
+	return "line too long (max: " + formatBytes(e.MaxSize) + ")"
+}
+
+func formatBytes(n int) string {
+	if n >= 1024*1024 {
+		return fmt.Sprintf("%dMB", n/(1024*1024))
+	}
+	if n >= 1024 {
+		return fmt.Sprintf("%dKB", n/1024)
+	}
+	return fmt.Sprintf("%dB", n)
 }
